@@ -30,13 +30,25 @@ class QCTNHelper:
             yield symbol
 
     @staticmethod
-    def generate_example_graph():
+    def generate_example_graph(target=False):
         """Generate an example quantum circuit graph."""
-        return "-2-----B-5-C-3-D-----2-\n" \
-               "-2-A-4---------D-----2-\n" \
-               "-2-A-4-B-7-C-2-D-4-E-2-\n" \
-               "-2-A-3-B-6---------E-2-\n" \
-               "-2---------C-8-----E-2-"
+        if target:
+            return  "-2-A-5-----C-3-----E-2-\n" \
+                    "-2-----B-----------E-2-\n" \
+                    "-2-A-4-B-7-C-2-D-4-E-2-\n" \
+                    "-2-----B-6-----D-----2-\n" \
+                    "-2-A-3-----C-8-D-----2-"
+        else:
+            return  "-2-----B-5-C-3-D-----2-\n" \
+                    "-2-A-4---------D-----2-\n" \
+                    "-2-A-4-B-7-C-2-D-4-E-2-\n" \
+                    "-2-A-3-B-6---------E-2-\n" \
+                    "-2---------C-8-----E-2-"
+    
+    @staticmethod
+    def generate_example_graph2():
+        """Generate an example quantum circuit graph."""
+
     
     @staticmethod
     def generate_random_example_graph(nqubits=5, ncores=3):
@@ -237,13 +249,12 @@ class QCTN:
         """
         if not isinstance(qctn, QCTN):
             raise TypeError("The argument must be an instance of QCTN.")
-        # Here we would implement the contraction logic using JAX or other libraries.
-        # For now, we will raise NotImplementedError as a placeholder.
-        # This is a placeholder for the contraction logic.
-        # For now, we will raise NotImplementedError as a placeholder.
+        if not list(itertools.chain.from_iterable(self.circuit[0])) == list(itertools.chain.from_iterable(qctn.circuit[0])):
+            raise ValueError("Input ranks of the two QCTNs do not match.")
+        if not list(itertools.chain.from_iterable(self.circuit[2])) == list(itertools.chain.from_iterable(qctn.circuit[2])):
+            raise ValueError("Output ranks of the two QCTNs do not match.")
         
-        # Placeholder for contraction logic
-        raise NotImplementedError("Contraction logic is not implemented yet.")
+        return engine.contract_with_QCTN(self, qctn)
     
     def _contract_for_core_gradient(self, core_name, inputs=None, engine=ContractorOptEinsum):
         """

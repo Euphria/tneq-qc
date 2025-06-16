@@ -15,9 +15,9 @@ class UnitTestQCTN:
     contraction_engine = ContractorOptEinsum if Configuration.contraction_engine == 'opt_einsum' else ContractorQCTN
 
     @staticmethod
-    def test_qctn_initialization():
+    def test_qctn_initialization(traget=False):
         """Test the initialization of QCTN with a sample graph."""
-        example_graph = QCTNHelper.generate_example_graph()
+        example_graph = QCTNHelper.generate_example_graph(traget)
         print(f"Example Graph: \n{example_graph}")
         qctn = QCTN(example_graph)
         print(f"QCTN Adjacency Matrix:\n{qctn.__repr__()}")
@@ -59,11 +59,17 @@ if __name__ == "__main__":
     # result = UnitTestQCTN.test_qctn_contract_opt_einsum_core_only()
     # print(f"Contraction Result: {result}")
 
-    print("\nTesting QCTN Input Contraction with opt_einsum:")
+    # print("\nTesting QCTN Input Contraction with opt_einsum:")
+    # qctn_example = UnitTestQCTN.test_qctn_initialization()
+    # inputs = jax.random.normal(jax.random.PRNGKey(0), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
+    # result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
+    # print(f"Contraction Result with Inputs: {result}")
+
+    print("\nTesting QCTN Contraction with Another QCTN:")
     qctn_example = UnitTestQCTN.test_qctn_initialization()
-    inputs = jax.random.normal(jax.random.PRNGKey(0), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
-    result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
-    print(f"Contraction Result with Inputs: {result}")
+    qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
+    result = qctn_example.contract(qctn_target, engine=UnitTestQCTN.contraction_engine)
+    print(f"Contraction Result with Another QCTN: {result}")
 
     # Further tests can be added here
     print("\nAll tests completed.")

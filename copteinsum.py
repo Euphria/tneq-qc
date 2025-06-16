@@ -150,3 +150,121 @@ class ContractorOptEinsum:
         retracted_QCTN = jit_retraction(*inputs_cores)
 
         return retracted_QCTN
+    
+    @staticmethod
+    def contract_with_QCTN(qctn, target_qctn):
+        """
+        Contract the given QCTN with a target QCTN.
+        
+        Args:
+            qctn (QCTN): The quantum circuit tensor network to contract.
+            target_qctn (QCTN): The target quantum circuit tensor network for contraction.
+        
+        Returns:
+            jnp.ndarray: The result of the tensor contraction.
+        """
+
+        input_ranks, adjacency_matrix, output_ranks = qctn.circuit
+        cores_name = qctn.cores
+        cores_weights = qctn.cores_weigts
+
+        target_input_ranks, target_adjacency_matrix, target_output_ranks = target_qctn.circuit
+        target_cores_name = target_qctn.cores
+        target_cores_weights = target_qctn.cores_weigts
+
+        symbol_id = 0
+        einsum_equation_lefthand = ''
+        target_einsum_equation_lefthand = ''
+
+        adjacency_matrix_for_interaction = adjacency_matrix.copy()
+
+        from tenmul_qc import QCTNHelper
+        for element in QCTNHelper.jax_triu_ndindex(len(cores_name)):
+            i, j = element
+            if adjacency_matrix_for_interaction[i, j]:
+                # If there is a connection between core i and core j
+                connection_num = len(adjacency_matrix[i, j])
+                connection_symbols = [opt_einsum.get_symbol(symbol_id + k) for k in range(connection_num)]
+                symbol_id += connection_num
+                adjacency_matrix[i, j] = connection_symbols
+                adjacency_matrix[j, i] = connection_symbols  # Ensure symmetry
+
+        target_adjacency_matrix_for_interaction = target_adjacency_matrix.copy()
+        for element in QCTNHelper.jax_triu_ndindex(len(target_cores_name)):
+            i, j = element
+            if target_adjacency_matrix_for_interaction[i, j]:
+                # If there is a connection between core i and core j
+                connection_num = len(target_adjacency_matrix[i, j])
+                connection_symbols = [opt_einsum.get_symbol(symbol_id + k) for k in range(connection_num)]
+                symbol_id += connection_num
+                target_adjacency_matrix[i, j] = connection_symbols
+                target_adjacency_matrix[j, i] = connection_symbols
+
+        input_symbols_stack = []
+        output_symbols_stack = []
+
+        # self.einsum_equation_lefthand
+        for idx, _ in enumerate(cores_name):
+            for _ in input_ranks[idx]:
+                symbol = opt_einsum.get_symbol(symbol_id)
+                einsum_equation_lefthand += symbol
+                input_symbols_stack.append(symbol)
+                symbol_id += 1
+
+            einsum_equation_lefthand += "".join(list(itertools.chain.from_iterable(adjacency_matrix[idx])))
+
+            for _ in output_ranks[idx]:
+                symbol = opt_einsum.get_symbol(symbol_id)
+                einsum_equation_lefthand += symbol
+                output_symbols_stack.append(symbol)
+                symbol_id += 1
+            
+            einsum_equation_lefthand += ','
+        
+        # target.einsum_equation_lefthand
+        for idx, _ in enumerate(target_cores_name):
+            for _ in target_input_ranks[idx]:
+                target_einsum_equation_lefthand += input_symbols_stack.pop(0)
+
+            target_einsum_equation_lefthand += "".join(list(itertools.chain.from_iterable(target_adjacency_matrix[idx])))
+
+            for _ in target_output_ranks[idx]:
+                target_einsum_equation_lefthand += output_symbols_stack.pop(0)
+            
+            target_einsum_equation_lefthand += ','
+
+        einsum_equation = f'{einsum_equation_lefthand}{target_einsum_equation_lefthand[:-1]}->'
+
+        tensor_shapes = [cores_weights[core_name].shape for core_name in cores_name] + \
+                        [target_cores_weights[core_name].shape for core_name in target_cores_name]
+
+
+        for core_name in cores_name:
+            print(f'Core: {core_name}, Shape: {cores_weights[core_name].shape}')
+
+        for core_name in target_cores_name:
+            print(f'Target Core: {core_name}, Shape: {target_cores_weights[core_name].shape}')
+        
+        print(f'QCTN: {qctn.circuit}')
+        print(f'Target QCTN: {target_qctn.circuit}')
+        print(f'Einsum Equation: {einsum_equation}')
+        print(f'Tensor Shapes: {tensor_shapes}')
+
+        einsum_expr = opt_einsum.contract_expression(einsum_equation, *tensor_shapes, optimize=Configuration.opt_einsum_optimize)
+        jit_retraction = jax.jit(einsum_expr)
+
+        inputs_cores = [cores_weights[core_name] for core_name in cores_name] + \
+                       [target_cores_weights[core_name] for core_name in target_cores_name]
+        
+        retracted_QCTN = jit_retraction(*inputs_cores)
+
+        return retracted_QCTN
+
+        
+    
+    def _contract_for_core_gradient(*args, **kwargs):
+        """
+        We use JAX's autograd to compute the core gradient.
+        """
+
+        raise NotImplementedError("Core gradient is calculated by jax autogradient.")
