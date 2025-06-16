@@ -28,7 +28,7 @@ result = qctn.contract()
 
 A quantum circuit is described as a multi-line string, where each line represents a qubit and connections to tensor cores (labeled by uppercase letters or CJK characters):
 
-```
+```text
 -2-----B-5-C-3-D-----2-
 -2-A-4---------D-----2-
 -2-A-4-B-7-C-2-D-4-E-2-

@@ -214,14 +214,14 @@ class QCTN:
         Returns:
             The result of the contraction operation.
         """
-        
+
         # Validate inputs
         if inputs is None:
             raise ValueError("Inputs must be provided for contraction.")
         if not isinstance(inputs, jnp.ndarray):
             raise TypeError("Inputs must be a jnp.ndarray.")
-        if inputs.shape != tuple(self.circuit[0]):
-            raise ValueError(f"Input tensor shape {inputs.shape} does not match expected shape {tuple(self.circuit[0])}.")
+        if inputs.shape != tuple(itertools.chain.from_iterable(self.circuit[0])):
+            raise ValueError(f"Input tensor shape {inputs.shape} does not match expected shape {tuple(itertools.chain.from_iterable(self.circuit[0]))}.")
 
         return engine.contract_with_inputs(self, inputs)
 

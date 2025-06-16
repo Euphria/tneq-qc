@@ -2,6 +2,8 @@ from config import Configuration
 from tenmul_qc import QCTN, QCTNHelper
 from cqctn import ContractorQCTN
 from copteinsum import ContractorOptEinsum
+import jax, itertools
+import jax.numpy as jnp
 
 class UnitTestQCTN:
     """
@@ -53,9 +55,15 @@ if __name__ == "__main__":
     # print("\nTesting QCTN Initialization with Random Graph:")
     # qctn_random = UnitTestQCTN.test_qctn_initialization_with_random_graph()
     
-    print("\nTesting QCTN Contraction with opt_einsum:")
-    result = UnitTestQCTN.test_qctn_contract_opt_einsum_core_only()
-    print(f"Contraction Result: {result}")
+    # print("\nTesting QCTN Contraction with opt_einsum:")
+    # result = UnitTestQCTN.test_qctn_contract_opt_einsum_core_only()
+    # print(f"Contraction Result: {result}")
+
+    print("\nTesting QCTN Input Contraction with opt_einsum:")
+    qctn_example = UnitTestQCTN.test_qctn_initialization()
+    inputs = jax.random.normal(jax.random.PRNGKey(0), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
+    result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
+    print(f"Contraction Result with Inputs: {result}")
 
     # Further tests can be added here
     print("\nAll tests completed.")
