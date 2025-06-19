@@ -49,27 +49,40 @@ class UnitTestQCTN:
 
 if __name__ == "__main__":
     # Run unit tests for QCTN
-    # print("Testing QCTN Initialization with Example Graph:")
-    # qctn_example = UnitTestQCTN.test_qctn_initialization()
-    
-    # print("\nTesting QCTN Initialization with Random Graph:")
-    # qctn_random = UnitTestQCTN.test_qctn_initialization_with_random_graph()
-    
-    # print("\nTesting QCTN Contraction with opt_einsum:")
-    # result = UnitTestQCTN.test_qctn_contract_opt_einsum_core_only()
-    # print(f"Contraction Result: {result}")
 
-    # print("\nTesting QCTN Input Contraction with opt_einsum:")
-    # qctn_example = UnitTestQCTN.test_qctn_initialization()
-    # inputs = jax.random.normal(jax.random.PRNGKey(0), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
-    # result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
-    # print(f"Contraction Result with Inputs: {result}")
+    if False:
+        print("Testing QCTN Initialization with Example Graph:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        
+        print("\nTesting QCTN Initialization with Random Graph:")
+        qctn_random = UnitTestQCTN.test_qctn_initialization_with_random_graph()
+        
+        print("\nTesting QCTN Contraction with opt_einsum:")
+        result = UnitTestQCTN.test_qctn_contract_opt_einsum_core_only()
+        print(f"Contraction Result: {result}")
 
-    print("\nTesting QCTN Contraction with Another QCTN:")
+        print("\nTesting QCTN Input Contraction with opt_einsum:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        inputs = jax.random.normal(jax.random.PRNGKey(0), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
+        result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
+        print(f"Contraction Result with Inputs: {result}")
+
+        print("\nTesting QCTN Contraction with Another QCTN:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
+        result = qctn_example.contract(qctn_target, engine=UnitTestQCTN.contraction_engine)
+        print(f"Contraction Result with Another QCTN: {result}")
+
+    print("\nTesting QCTN Vector Input Contraction with opt_einsum:")
     qctn_example = UnitTestQCTN.test_qctn_initialization()
-    qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
-    result = qctn_example.contract(qctn_target, engine=UnitTestQCTN.contraction_engine)
-    print(f"Contraction Result with Another QCTN: {result}")
+
+    inputs = [
+        jax.random.normal(jax.random.PRNGKey(i), shape)
+        for i, shape in enumerate(itertools.chain.from_iterable(qctn_example.circuit[0]))
+    ]
+    result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
+    print(f"Contraction Result with Inputs: {result}")
 
     # Further tests can be added here
     print("\nAll tests completed.")
+    

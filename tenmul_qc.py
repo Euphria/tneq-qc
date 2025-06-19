@@ -236,6 +236,37 @@ class QCTN:
             raise ValueError(f"Input tensor shape {inputs.shape} does not match expected shape {tuple(itertools.chain.from_iterable(self.circuit[0]))}.")
 
         return engine.contract_with_inputs(self, inputs)
+    
+
+    def _contract_with_vector_inputs(self, inputs: list = None, engine=ContractorOptEinsum):
+        """
+        Contract the quantum circuit tensor network with given inputs.
+
+        Args:
+            inputs (jnp.ndarray): The inputs for the contraction operation.
+                It should be a tensor with the shape matching the input ranks of the circuit.
+
+        Returns:
+            The result of the contraction operation.
+        """
+
+        # Validate inputs
+        if inputs is None:
+            raise ValueError("Inputs must be provided for contraction.")
+        if not all(isinstance(t, jnp.ndarray) for t in inputs):
+            raise TypeError("All elements in the list must be jnp.ndarray.")
+        if len(inputs) != self.nqubits:
+            raise ValueError(f"Expected {self.nqubits} input vectors, got {len(inputs)}.")
+        
+        # Check dimensions of all inputed vectors
+        if not all(t.ndim == 1 for t in inputs):
+            raise ValueError("All input tensors must be 1-dimensional vectors.")
+
+        if tuple(t.shape[0] for t in inputs) != tuple(itertools.chain.from_iterable(self.circuit[0])):
+            raise ValueError(f"Input tensor shapes {tuple(t.shape for t in inputs)} do not match expected shape {tuple(itertools.chain.from_iterable(self.circuit[0]))}.")
+
+        return engine.contract_with_vector_inputs(self, inputs)
+
 
     def _contract_with_QCTN(self, qctn, engine=ContractorOptEinsum):
         """
@@ -276,13 +307,14 @@ class QCTN:
         # Placeholder for contraction logic
         raise NotImplementedError("Contraction logic is not implemented yet.")
 
-    def contract(self, attach: Union[jnp.ndarray, 'QCTN'] = None, engine=ContractorOptEinsum):
+    def contract(self, attach: Union[jnp.ndarray, 'QCTN', list] = None, engine=ContractorOptEinsum):
         """
         Contract the quantum circuit tensor network.
 
         Args:
-            attach (Union[jnp.ndarray, 'QCTN'], optional): The inputs for the contraction operation.
+            attach (Union[jnp.ndarray, list[jnp.ndarray], 'QCTN'], optional): The inputs for the contraction operation.
                 If a jnp.ndarray is provided, it should be a tensor with the shape matching the input ranks of the circuit.
+                If a list of jnp.ndarray is provided, it should contain vectors for each qubit.
                 If a QCTN instance is provided, it will contract with that instance.
             engine (ContractorOptEinsum): The contraction engine to use. Default is ContractorOptEinsum.
 
@@ -294,7 +326,9 @@ class QCTN:
             return self._contract_core_only(engine)
         elif isinstance(attach, jnp.ndarray):
             return self._contract_with_inputs(attach, engine)
+        elif isinstance(attach, list):
+            return self._contract_with_vector_inputs(attach, engine)
         elif isinstance(attach, QCTN):
             return self._contract_with_QCTN(attach, engine)
         else:
-            raise TypeError("attach must be a jnp.ndarray or an instance of QCTN.")
+            raise TypeError("attach must be a jnp.ndarray, a list of jnp.ndarray or an instance of QCTN.")
