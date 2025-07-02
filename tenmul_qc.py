@@ -124,7 +124,7 @@ class QCTN:
         self.initialize_random_key = jax.random.PRNGKey(0)
 
         # Initialize the cores with random values
-        self.cores_weigts = {}
+        self.cores_weights = {}
         self._init_cores()
 
         # Placeholders for einsum expressions
@@ -197,7 +197,7 @@ class QCTN:
         Initialize the cores of the quantum circuit with random values.
         
         Returns:
-            None: The cores are stored in the `cores_weigts` attribute.
+            None: The cores are stored in the `cores_weights` attribute.
         """
 
         for idx, core_name in enumerate(self.cores):
@@ -209,7 +209,7 @@ class QCTN:
 
             core_shape = input_rank + list(itertools.chain.from_iterable(adjacency_ranks)) + output_rank
             core = jax.random.normal(self.initialize_random_key, shape=core_shape) * Configuration.initialize_variance          
-            self.cores_weigts[core_name] = core
+            self.cores_weights[core_name] = core
 
     def _contract_core_only(self, engine=ContractorOptEinsum):
         """
@@ -352,17 +352,20 @@ class QCTN:
             raise TypeError("attach must be an instance of QCTN.")
         return self._contract_with_QCTN_for_gradient(attach, engine)
     
-    def optimizer_step(self, optimizer, loss_fn, inputs=None):
+    def optimize_contract_with_QCTN(self, attach, optimizer, engine=ContractorOptEinsum):
         """
-        Perform a single optimization step using the provided optimizer and loss function.
-        
+        Optimize the contraction with another QCTN instance using a specified optimizer.
+
         Args:
-            optimizer: The optimizer to use for the optimization step.
-            loss_fn: The loss function to compute the loss and gradients.
-            inputs (jnp.ndarray, optional): The inputs for the contraction operation.
-                It should be a tensor with the shape matching the input ranks of the circuit.
+            attach (QCTN): The QCTN instance to contract with.
+            optimizer (Optimizer): The optimizer to use for the optimization process.
+            engine (ContractorOptEinsum): The contraction engine to use. Default is ContractorOptEinsum.
 
         Returns:
-            The updated QCTN instance after the optimization step.
+            The optimized parameters after the contraction operation.
         """
-        return optimizer.step(loss_fn, self, inputs)
+        if not isinstance(attach, QCTN):
+            raise TypeError("attach must be an instance of QCTN.")
+        
+        return optimizer.optimize(self.contract_with_QCTN_for_gradient, attach, engine=engine)
+    

@@ -2,6 +2,7 @@ from config import Configuration
 from tenmul_qc import QCTN, QCTNHelper
 from cqctn import ContractorQCTN
 from copteinsum import ContractorOptEinsum
+from optimizer import Optimizer
 import jax, itertools
 import jax.numpy as jnp
 
@@ -83,13 +84,21 @@ if __name__ == "__main__":
         result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
         print(f"Contraction Result with Inputs: {result}")
 
-    print("\nTesting QCTN Contraction with Another QCTN for gradient:")
+        print("\nTesting QCTN Contraction with Another QCTN for gradient:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
+        loss, grads = qctn_example.contract_with_QCTN_for_gradient(qctn_target, engine=UnitTestQCTN.contraction_engine)
+        print(f"Gradient: {grads}")
+        print(f"Core shape: {[c.shape for c in qctn_example.cores_weights.values()]}")
+        print(f"Gradient shape: {[g.shape for g in grads]}")
+
+    print("\nTesting Optimizer with QCTN:")
     qctn_example = UnitTestQCTN.test_qctn_initialization()
     qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
+    optimizer = Optimizer(method='adam', max_iter=1000, tol=1e-6, learning_rate=0.1, beta1=0.9, beta2=0.95, epsilon=1e-8)
+    optimizer.optimize(qctn_example, qctn_target)
     loss, grads = qctn_example.contract_with_QCTN_for_gradient(qctn_target, engine=UnitTestQCTN.contraction_engine)
-    print(f"Gradient: {grads}")
-    print(f"Core shape: {[c.shape for c in qctn_example.cores_weigts.values()]}")
-    print(f"Gradient shape: {[g.shape for g in grads]}")
+    print(f"Final Loss: {loss}")
     
     # Further tests can be added here
     print("\nAll tests completed.")

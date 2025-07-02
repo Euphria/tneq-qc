@@ -28,7 +28,7 @@ class ContractorOptEinsum:
 
         input_ranks, adjacency_matrix, output_ranks = qctn.circuit
         cores_name = qctn.cores
-        cores_weights = qctn.cores_weigts
+        cores_weights = qctn.cores_weights
 
         symbol_id = 0
         einsum_equation_lefthand = ''
@@ -95,7 +95,7 @@ class ContractorOptEinsum:
 
         input_ranks, adjacency_matrix, output_ranks = qctn.circuit
         cores_name = qctn.cores
-        cores_weights = qctn.cores_weigts
+        cores_weights = qctn.cores_weights
 
         symbol_id = 0
         einsum_equation_lefthand = ''
@@ -167,7 +167,7 @@ class ContractorOptEinsum:
 
         input_ranks, adjacency_matrix, output_ranks = qctn.circuit
         cores_name = qctn.cores
-        cores_weights = qctn.cores_weigts
+        cores_weights = qctn.cores_weights
 
         symbol_id = 0
         einsum_equation_lefthand = ''
@@ -239,11 +239,11 @@ class ContractorOptEinsum:
 
         input_ranks, adjacency_matrix, output_ranks = qctn.circuit
         cores_name = qctn.cores
-        cores_weights = qctn.cores_weigts
+        cores_weights = qctn.cores_weights
 
         target_input_ranks, target_adjacency_matrix, target_output_ranks = target_qctn.circuit
         target_cores_name = target_qctn.cores
-        target_cores_weights = target_qctn.cores_weigts
+        target_cores_weights = target_qctn.cores_weights
 
         symbol_id = 0
         einsum_equation_lefthand = ''
@@ -344,9 +344,9 @@ class ContractorOptEinsum:
         """
 
         cores_name = qctn.cores
-        cores_weights = qctn.cores_weigts
+        cores_weights = qctn.cores_weights
         target_cores_name = target_qctn.cores
-        target_cores_weights = target_qctn.cores_weigts
+        target_cores_weights = target_qctn.cores_weights
         
         inputs_cores = [cores_weights[core_name] for core_name in cores_name] + \
             [target_cores_weights[core_name] for core_name in target_cores_name]
