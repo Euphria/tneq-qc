@@ -94,7 +94,9 @@ if __name__ == "__main__":
 
     print("\nTesting Optimizer with QCTN:")
     qctn_example = UnitTestQCTN.test_qctn_initialization()
+    print("\nqctn_example:", qctn_example)
     qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
+    print("\nqctn_target:", qctn_target)
     optimizer = Optimizer(method='adam', max_iter=1000, tol=1e-6, learning_rate=0.1, beta1=0.9, beta2=0.95, epsilon=1e-8)
     optimizer.optimize(qctn_example, qctn_target)
     loss, grads = qctn_example.contract_with_QCTN_for_gradient(qctn_target, engine=UnitTestQCTN.contraction_engine)
