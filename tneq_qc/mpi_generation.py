@@ -1,11 +1,11 @@
 from typing import Any, Callable
 import numpy as np
 import random, string, os
-from evolve import EVOLVE_OPS, FITNESS_FUNCS
-from callbacks import CALLBACKS, LOG_FORMATER
-from mpi_core import REASONS, INDIVIDUAL_STATUS
+from .evolve import EVOLVE_OPS, FITNESS_FUNCS
+from .callbacks import CALLBACKS, LOG_FORMATER
+from .mpi_core import REASONS, INDIVIDUAL_STATUS
 import itertools
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class Individual:
@@ -42,25 +42,8 @@ class Individual:
         return adj_matrix
 
     def __init__(self, adj_matrix=None, scope=None, **kwds):
-        ## basic propoerties
-        if adj_matrix is None:
-            self.adj_matrix = kwds['adj_func'](**kwds)
-        elif adj_matrix is Callable:
-            self.adj_matrix = adj_matrix(self)
-        else:
-            self.adj_matrix = adj_matrix
-
-        self.adj_matrix[np.tril_indices(self.dim, -1)] = self.adj_matrix.transpose()[np.tril_indices(self.dim, -1)]
-
-        self.scope = scope # this is also the "name" of the individual
-        self.dim = self.adj_matrix.shape[0]
-        self.repeat_loss = []
-        self.repeat_loss_iter = []
-        self.repeat_loss_reason = []
-        self.total_score = None
-        self.status = INDIVIDUAL_STATUS() # the running status
-
-        ## parse the kwds
+        # Parse kwds first to get parameters needed for matrix generation
+        self.scope = scope
         self.parents = kwds.get('parents', None)
         self.individual_property = kwds.get('individual_property', {})
         self.discard_hard_timeout_result = self.individual_property.get('discard_hard_timeout_result', False)
@@ -68,10 +51,31 @@ class Individual:
 
         ## for random initilization
         self.tn_size = self.random_initilization_property.get('tn_size', 4)
-        self.tn_rank = self.random_initilization_property.get('tn_rank', 2)
+        self.tn_rank = self.random_initilization_property.get('tn_rank', 2) 
         self.presented_shape = self.random_initilization_property.get('presented_shape', 2)
-        self.init_sparsity = self.random_initilization_property.get('init_sparsity', -0.00001) 
+        self.init_sparsity = self.random_initilization_property.get('init_sparsity', -0.00001)
+        
+        ## Create adj_matrix
+        if adj_matrix is None:
+            adj_func = kwds.get('adj_func', Individual.naive_random_adj_matrix_with_sparsity_limitation)
+            self.adj_matrix = adj_func(self)
+        elif callable(adj_matrix):
+            self.adj_matrix = adj_matrix(self)
+        else:
+            self.adj_matrix = adj_matrix
 
+        # Make matrix symmetric
+        self.dim = self.adj_matrix.shape[0]
+        self.adj_matrix[np.tril_indices(self.dim, -1)] = self.adj_matrix.transpose()[np.tril_indices(self.dim, -1)]
+
+        ## Initialize tracking variables
+        self.repeat_loss = []
+        self.repeat_loss_iter = []
+        self.repeat_loss_reason = []
+        self.total_score = None
+        self.status = INDIVIDUAL_STATUS() # the running status
+
+        ## Calculate sparsity
         ## adj_matrix_k put all the 0 edge to 1, this is only used for calulation of sparsity
         ## sparsity is the ratio of actual # elements to its presented # elements
         ## sparsity_connection is the # connections (compared to full connection)
@@ -134,17 +138,17 @@ class Individual:
             return True
         else:
             return
-  
+
 
 class Generation:
 
     @dataclass
     class Society:
         name: None
-        individuals: list[Any] = []
-        score_original: list[Any] = []
-        score_total: list[Any] = []
-        indv_ranking: list[Any] = []
+        individuals: list[Any] = field(default_factory=list)
+        score_original: list[Any] = field(default_factory=list)
+        score_total: list[Any] = field(default_factory=list)
+        indv_ranking: list[Any] = field(default_factory=list)
         finished: bool = False
         fitness_func: Callable = None
 
@@ -175,25 +179,36 @@ class Generation:
     def init_societies_individuals(self, pG=None):
         if pG:
             for k, v in pG.societies.items():
-                self.societies[k] = {}
-                self.societies[k]['indv'] = \
+                society = self.Society(
+                    name=k,
+                    individuals=[],
+                    fitness_func=v.fitness_func if hasattr(v, 'fitness_func') else None
+                )
+                society.individuals = \
                         [ Individual(adj_matrix=indv.adj_matrix, parents=indv.parents,
                           scope='{}/{}/{:03d}'.format(self.name, k, idx), **self.kwds) \
-                        for idx, indv in enumerate(v['indv']) ]
-                self.indv_to_distribute += [indv for indv in self.societies[k]['indv']]
+                        for idx, indv in enumerate(v.individuals) ]
+                self.societies[k] = society
+                self.indv_to_distribute += [indv for indv in society.individuals]
 
         else:
-            for n in range(self.kwds['N_islands']):
-                society_name = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(5)) + f'{n}'
-                self.societies[society_name] = {}
-                self.societies[society_name]['indv'] = [ \
+            for param_dict in self.society_params_list:
+                n_individuals = param_dict.get('n_individuals_span', 20)
+                fitness_func = param_dict.get('fitness_func', None)
+                
+                society_name = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(5))
+                
+                society = self.Society(
+                    name=society_name,
+                    individuals=[],
+                    fitness_func=fitness_func
+                )
+                society.individuals = [ \
                         Individual(scope='{}/{}/{:03d}'.format(self.name, society_name, i), 
-                        adj_func=Individual.naive_random_adj_matrix_with_sparsity_limitation) \
-                        for i in range(self.kwds['population'][n]) ]
-                self.indv_to_distribute += [indv for indv in self.societies[society_name]['indv']]
-
-        self.available_agents = dict(
-            itertools.zip_longest(list(range(1, self.agent_size+1)), [], fillvalue=INDIVIDUAL_STATUS()))
+                        adj_func=Individual.naive_random_adj_matrix_with_sparsity_limitation, **self.kwds) \
+                        for i in range(n_individuals) ]
+                self.societies[society_name] = society
+                self.indv_to_distribute += [indv for indv in society.individuals]
 
     def __init__(self, pG=None, name=None, **kwds):
         ## basic propoerties
@@ -201,32 +216,25 @@ class Generation:
 
         ## parse the kwds
         self.kwds = kwds
+        self.logger = kwds.get('logger', None)
         self.generation_property = kwds.get('generation_property', {})
         self.evaluate_repeat = self.generation_property.get('evaluate_repeat', 2)
         self.still_allow_repeat_after_hard_timeout = self.generation_property.get('still_allow_repeat_after_hard_timeout', True)
 
+        ## Queues for individuals
+        self.indv_to_distribute = []
+        self.indv_to_collect = []
 
         ## parse and init societies
         self.society_property = self.generation_property.get('society_property', {})
         self.n_societies = self.generation_property.get('n_societies', 1)
-        self.society_params_list = self.society_property.get('society', [dict(n_individuals_span=200, n_individuals_survive=100, fitness_func=FITNESS_FUNCS.defualt)])
+        self.society_params_list = self.society_property.get('society', [dict(n_individuals_span=20, n_individuals_survive=10, fitness_func=FITNESS_FUNCS.defualt)])
         if len(self.society_params_list) == 1 and self.n_societies > 1:
             self.society_params_list = self.society_params_list * self.n_societies
         elif len(self.society_params_list) != self.n_societies:
             raise ValueError('Cannot parse society_params due to number balance between n_societies and society_params.')
 
         self.societies = {}
-        for param in self.society_params_list:
-            fitness_func = param.get('fitness_func', FITNESS_FUNCS.defualt)
-            if fitness_func is not Callable:
-                self.
-
-            # n_individuals_span: 200
-            # n_individuals_survive: 100 
-            # evolution:
-            #     - ops: elimation
-            #     - ops: mutation
-        
         
         self.init_societies_individuals(pG=pG)
         
@@ -308,9 +316,10 @@ class Generation:
         if indv.status.finished:
             return True
         else:
-            if indv.status.repeat >= 
+            pass
+            # if indv.status.repeat >= 
 
-            if 
+            # if 
 
             return indv.status.finished
         pass
@@ -320,11 +329,21 @@ class Generation:
 
     def is_finished(self):
 
-        # if self.previous_generation is not None:
-        self.current_generation(**self.kwds)
-        CALLBACKS.GENERATION(generation=self.current_generation)
-    
+        # TODO: if self.previous_generation is not None:
+        # self.current_generation(**self.kwds)
+        # CALLBACKS.GENERATION(generation=self.current_generation)
+
+        self.logger.debug(f'Checking if generation {self.name} is finished {len(self.indv_to_distribute)} {len(self.indv_to_collect)}')
+
         if len(self.indv_to_distribute) == 0 and len(self.indv_to_collect) == 0:
+            # All individuals have been processed
+            # Now evaluate and evolve
+            self.evaluate()
+            self.evolve()
+            
+            if self.logger:
+                self.logger.info(f'Generation {self.name} finished evaluation and evolution.')
+            
             return True
         else:
             return False
