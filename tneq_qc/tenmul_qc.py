@@ -34,7 +34,7 @@ class QCTNHelper:
         """Generate an example quantum circuit graph."""
         if target:
             return  "-2-A-5-----C-3-----E-2-\n" \
-                    "-2-----B-----------E-2-\n" \
+                    "-2-----B----4------E-2-\n" \
                     "-2-A-4-B-7-C-2-D-4-E-2-\n" \
                     "-2-----B-6-----D-----2-\n" \
                     "-2-A-3-----C-8-D-----2-"
@@ -44,7 +44,7 @@ class QCTNHelper:
                     "-2-A-4-B-7-C-2-D-4-E-2-\n" \
                     "-2-A-3-B-6---------E-2-\n" \
                     "-2---------C-8-----E-2-"
-    
+
     @staticmethod
     def generate_example_graph2():
         """Generate an example quantum circuit graph."""
@@ -202,7 +202,7 @@ class QCTN:
         dict_core2idx = {core: idx for idx, core in enumerate(self.cores)}
         input_pattern = re.compile(rf"^(\d+)([{cores}])")
         output_pattern = re.compile(rf"([{cores}])(\d+)$")
-        connect_pattern = re.compile(rf"([{cores}])(\d+)([{cores}])")
+        connect_pattern = re.compile(rf"([{cores}])(\d+)(?=[{cores}])")
 
         # print(f"Input Pattern: {input_pattern.pattern}")
         # print(f"Output Pattern: {output_pattern.pattern}")
@@ -219,8 +219,17 @@ class QCTN:
             output_core_idx = dict_core2idx[output_core]
             input_ranks[input_core_idx].append(input_rank)
             output_ranks[output_core_idx].append(output_rank)
+            
             for match in connect_pattern.finditer(line):
-                core1, rank1, core2 = match.groups()
+                end_pos = match.end()
+                if end_pos >= len(line):
+                    print(f"Warning: end_pos {end_pos} out of range for line '{line}'")
+                    break
+
+                # print(f"match found: {match.groups()} {line[end_pos]}")
+                core1, rank1 = match.groups()
+                core2 = line[end_pos]
+
                 core1_idx = dict_core2idx[core1]
                 core2_idx = dict_core2idx[core2]
                 rank1 = int(rank1)
