@@ -152,7 +152,7 @@ class MPI_Agent(object):
                          f'qctn_example has {qctn_example.nqubits} qubits and {qctn_example.ncores} cores, '
                          f'gonna run {max_iterations} iterations.')
 
-        return qctn_example, max_iterations, optimizer_instance
+        return qctn_example, max_iterations, optimizer_instance, indv_scope
     
     def do_estimation(self, qctn_example, required_time):
         """Calculate current loss and estimate remaining time"""
@@ -168,7 +168,7 @@ class MPI_Agent(object):
 
         return return_dict
 
-    def prepare_report_result(self, qctn_example, current_iter, reason):
+    def prepare_report_result(self, qctn_example, current_iter, reason, scope):
         """Prepare final result report and clean up resources"""
         
         loss, _ = qctn_example.contract_with_QCTN_for_gradient(self.qctn_target, engine=self.contraction_engine)
@@ -183,6 +183,7 @@ class MPI_Agent(object):
             'loss': loss,
             'current_iter': current_iter,
             'reason': reason,
+            'indv_scope': scope,
         }
         self.logger.info(f'Reporting result {loss} at iteration {current_iter} with reason {reason}.')
 
@@ -256,7 +257,7 @@ class MPI_Agent(object):
                     self.tik(1)
                     continue
                 else:
-                    qctn_example, max_iterations, optimizer_instance = job
+                    qctn_example, max_iterations, optimizer_instance, indv_scope = job
                     self.busy_status = True
                     current_iter = 0
 
@@ -284,12 +285,12 @@ class MPI_Agent(object):
                     
                     # shutdown the computation
                     else:
-                        report = self.prepare_report_result(qctn_example, current_iter, REASONS.HARD_TIMEOUT)
+                        report = self.prepare_report_result(qctn_example, current_iter, REASONS.HARD_TIMEOUT, indv_scope)
                         self.report_result(report)
                         current_iter = max_iterations  # Mark as done to exit loop
             
             else:
-                report = self.prepare_report_result(qctn_example, current_iter, REASONS.REACH_MAX_ITER)
+                report = self.prepare_report_result(qctn_example, current_iter, REASONS.REACH_MAX_ITER, indv_scope)
                 self.report_result(report)
                 current_iter = None  # Reset for next job
                 self.busy_status = False

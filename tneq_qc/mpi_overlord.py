@@ -120,12 +120,13 @@ class MPI_Overlord():
 
         self.agent_report_buffer.append(msg)
         rank_rept = msg['rank']
+        indv_scope = msg['indv_scope']
 
         self.available_agents[rank_rept].assigned_job = None
         self.available_agents[rank_rept].estimation_time = None
         self.available_agents[rank_rept].current_iter = None
 
-        self.logger.info(f'Received final report from agent rank {rank_rept} with reason {REASONS.__rdict__[msg["reason"]]}, ' \
+        self.logger.info(f'Received final report of indv_scope {indv_scope} from agent rank {rank_rept} with reason {REASONS.__rdict__[msg["reason"]]}, ' \
                         f'reported final iteration {msg["current_iter"]}, ' \
                         f'final loss {msg["loss"]}.')
         
@@ -200,6 +201,8 @@ class MPI_Overlord():
         cg = self.get_current_generation()
         available_agents = self.check_available_agent()
         
+        self.logger.debug(f'Available agents for job assignment: {available_agents}.')
+
         for agent_rank in available_agents:
             # Check if there are individuals waiting to be distributed
             if not cg.indv_to_distribute:
@@ -242,8 +245,6 @@ class MPI_Overlord():
             cg.indv_to_collect.append(indv)
             
             self.logger.info(f'Assigned individual {job_data["scope"]} to agent rank {agent_rank}.')
-        
-        return
 
     def _adj_matrix_to_graph_string(self, adj_matrix):
         """Convert adjacency matrix to graph string representation for QCTN"""
@@ -260,7 +261,14 @@ class MPI_Overlord():
             report = self.agent_report_buffer.popleft()
             
             # Find the individual that matches this report
-            indv_scope = self.available_agents[report['rank']].assigned_job
+            # indv_scope = self.available_agents[report['rank']].assigned_job
+            indv_scope = report['indv_scope']
+
+            self.logger.debug(f'check indv_scope: {indv_scope} vs assigned job: {self.available_agents[report["rank"]].assigned_job}')
+            
+            self.logger.debug(f'Processing report from agent rank {report["rank"]} for individual scope {indv_scope}.')
+            self.logger.debug(f"current indv to distribute: {len(cg.indv_to_distribute)}, indv to collect: {len(cg.indv_to_collect)} ")
+
             if indv_scope is None:
                 self.logger.warning(f'Received report from agent rank {report["rank"]} but no job was assigned.')
                 continue
