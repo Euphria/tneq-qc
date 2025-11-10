@@ -55,3 +55,28 @@ A quantum circuit is described as a multi-line string, where each line represent
 
 - The contraction logic relies on an external engine (`ContractorOptEinsum`).
 - Some advanced contraction methods are placeholders and need implementation.
+
+## Roadmap
+
+### 1. Tensor Network Architecture
+- [x] Basic tensor network architecture
+- [ ] Mx module support (multi-dimensional tensor operations)
+
+### 2. Genetic Algorithm
+- [x] Graph representation method (TNGraph with ASCII art)
+- [x] Basic mutation operations (modify bond, insert tensor, remove tensor)
+- [ ] Composite mutation operations (multiple mutations in sequence)
+- [ ] Crossover operation (breeding from two parents)
+
+### 3. Backend Support
+- [x] JAX backend
+- [ ] cuTensorNet backend (NVIDIA GPU acceleration)
+- [ ] PyTorch backend
+- [x] opt_einsum backend
+- [ ] Custom hand-crafted contraction method (optimized for specific patterns)
+
+### 4. Distributed Computing Support
+- [x] MPI-based distribution (master-worker architecture)
+- [ ] ... (other distributed frameworks)
+- [x] Multi-GPU support (single node)
+- [ ] Multi-node support (cluster computing)
