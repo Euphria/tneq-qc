@@ -166,29 +166,48 @@ class Individual:
 
         qubit_idx = random.choice(range(self.dim))
 
-        if op == 0:
-            # 选择一个link，把link数-1
-            num_link = len(self.graph.graph[qubit_idx])
-            link_idx = random.choice(range(num_link))
+        # TODO: change 100 -> max_trys
+        success = False
+        for i in range(100):
+            if op == 0:
+                # 选择一个link，把link数-1
+                num_link = len(self.graph.graph[qubit_idx])
+                link_idx = random.choice(range(num_link))
 
-            tensor_name = self.graph.graph[qubit_idx][link_idx][0]
+                tensor_name = self.graph.graph[qubit_idx][link_idx][0]
 
-            self.graph.modify_bond(qubit_idx, tensor_name, self.graph.graph[qubit_idx][link_idx][1], random.choice([0, self.tn_rank]))
+                try:
+                    self.graph.modify_bond(qubit_idx, tensor_name, random.choice([0, self.tn_rank]))
+                except ValueError:
+                    continue
 
-        elif op == 1:
-            # 选择一个link，把link拆开，也就是add一个tensor
-            num_link = len(self.graph.graph[qubit_idx])
-            link_idx = random.choice(range(num_link))
+            elif op == 1:
+                # 选择一个link，把link拆开，也就是add一个tensor
+                num_link = len(self.graph.graph[qubit_idx])
+                link_idx = random.choice(range(num_link))
 
-            tensor_name = self.graph.graph[qubit_idx][link_idx][0]
-            self.graph.insert_tensor_after(qubit_idx, tensor_name)
-        else:
-            # 选择一个tensor，把tensor删掉
-            num_tensor = len(self.graph.graph[qubit_idx])
-            tensor_idx = random.choice(range(num_tensor))
+                tensor_name = self.graph.graph[qubit_idx][link_idx][0]
 
-            self.graph.remove_tensor_from_qubit(qubit_idx, self.graph.graph[qubit_idx][tensor_idx][0])
-        return self    
+                try:
+                    self.graph.insert_tensor_after(qubit_idx, tensor_name)
+                except ValueError:
+                    continue
+            else:
+                # 选择一个tensor，把tensor删掉
+                num_tensor = len(self.graph.graph[qubit_idx])
+                tensor_idx = random.choice(range(num_tensor))
+
+                try:
+                    self.graph.remove_tensor_from_qubit(qubit_idx, self.graph.graph[qubit_idx][tensor_idx][0])
+                except ValueError:
+                    continue
+
+            success = True
+            print(f"successfully mutated with attempt {i}")
+
+            break
+
+        return self
 
     def crossover(self, other: 'Individual') -> tuple['Individual', 'Individual']:
         """
@@ -223,7 +242,8 @@ class Individual:
             dict: Contains graph, scope, and other relevant information
         """
         return {
-            'adj_matrix': self.graph,
+            'adj_matrix': self.graph,  # TNGraph object
+            'graph_string': self.graph.to_string(),  # String representation for serialization
             'scope': self.scope,
             'parents': self.parents,
             'sparsity': self.sparsity,
@@ -264,6 +284,7 @@ class Individual:
     
     def __str__(self) -> str:
         """String representation of the individual."""
+
         if self.status.finished:
             opt_str = f'{self.scope}: '
             opt_str += f'sparsity={self.sparsity:.3f}, '
@@ -279,7 +300,44 @@ class Individual:
     def __repr__(self) -> str:
         """Detailed representation."""
         return f"Individual(scope={self.scope}, fitness={self.fitness_score}, " \
-               f"sparsity={self.sparsity:.3f}, evaluated={len(self.report_loss)})"
+               f"sparsity={self.sparsity:.3f}, evaluated={len(self.report_loss)}, " \
+               f"losses={[float(f'{l:.4f}') for l in self.report_loss]}), graph=\n{self.graph.to_string()}\n"
+
+    def __call__(self, action=None, *args: Any, **kwds: Any) -> Any:
+        ## call an individual act as follows
+        ## 1. depoly: report its adj_matrix to generation, 
+        ##            generation will then forward it to overlord,
+        ##            individual then tracks the rank it passed to.
+        ## 2. collect: overlord report the repeat_loss to generation, 
+        ##             generation forward this loss to individual,
+        ##             individual process if the loss (discard of keep) then append it to repeat loss.
+        ## 3. assign: overlord report problem of this individual, 
+        ##            therefore generation provide a fake result for it
+
+        if action == 'deploy':
+            # return dict(adj_matrix=self.adj_matrix, scope=self.scope)
+            return dict(adj_matrix=None, scope=self.scope)
+        
+        elif action == 'collect':
+            reported_result = kwds.get('reported_result', None)
+            if reported_result:
+                if self.discard_hard_timeout_result and reported_result['reason'] == REASONS.HARD_TIMEOUT:
+                    pass
+                else:
+                    self.repeat_loss.append(reported_result['loss'])
+                    self.repeat_loss_iter.append(reported_result['current_iter'])
+                    self.repeat_loss_reason.append(reported_result['reason'])
+                return True
+            else:
+                return False
+
+        elif action == 'assign':
+            self.repeat_loss.append(kwds.get('loss', 1e9))
+            self.repeat_loss_iter.append(-1)
+            self.repeat_loss_reason.append(REASONS.FAKE_RESULT)
+            return True
+        else:
+            return
 
     # ============================================================
     # Static Factory Methods (for backward compatibility)
@@ -292,14 +350,27 @@ class Individual:
                               presented_shape: int = 2,
                               **kwds) -> 'Individual':
         """Create an individual with fully connected graph."""
-        if isinstance(presented_shape, list):
-            graph = np.diag(presented_shape)
-        else:
-            graph = np.diag([presented_shape] * tn_size)
+        # Build a fully connected TNGraph string
+        # For tn_size qubits, each qubit has all tensors A, B, C, ... connected
+        # Format: -2-A--r--B--r--C--r--...-2-
+        import string
         
-        graph[np.triu_indices(tn_size, 1)] = tn_rank
+        tensor_names = list(string.ascii_uppercase[:tn_size])
+        lines = []
         
-        return Individual(scope=scope, graph=graph, tn_rank=tn_rank, **kwds)
+        for i in range(tn_size):
+            # Each line has all tensors, fully connected
+            parts = [f"-{presented_shape if isinstance(presented_shape, int) else presented_shape[i]}-"]
+            for j, name in enumerate(tensor_names):
+                parts.append(name)
+                if j < len(tensor_names) - 1:
+                    parts.append(f"--{tn_rank}--")
+            parts.append(f"-{presented_shape if isinstance(presented_shape, int) else presented_shape[i]}-")
+            lines.append(''.join(parts))
+        
+        graph_string = '\n'.join(lines)
+        
+        return Individual(scope=scope, graph_string=graph_string, tn_rank=tn_rank, **kwds)
 
     @staticmethod
     def create_random(scope: str,
@@ -309,27 +380,38 @@ class Individual:
                      init_sparsity: float = 0.5,
                      **kwds) -> 'Individual':
         """Create an individual with random sparse connections."""
-        if isinstance(presented_shape, list):
-            graph = np.diag(presented_shape)
-        else:
-            graph = np.diag([presented_shape] * tn_size)
+        import string
+        import random
         
-        # Generate random connections
+        # Determine sparsity
         if init_sparsity < 0:
-            # Dynamic sparsity range
             real_init_sparsity = np.random.uniform(low=-init_sparsity, high=1.0)
-            n_connections = int(np.sum(np.arange(tn_size)))
-            connection = [int(np.random.uniform() > real_init_sparsity) * tn_rank 
-                         for _ in range(n_connections)]
         else:
-            # Fixed sparsity
-            n_connections = int(np.sum(np.arange(tn_size)))
-            connection = [int(np.random.uniform() > init_sparsity) * tn_rank 
-                         for _ in range(n_connections)]
+            real_init_sparsity = init_sparsity
         
-        graph[np.triu_indices(tn_size, 1)] = connection
+        tensor_names = list(string.ascii_uppercase[:tn_size])
+        lines = []
         
-        return Individual(scope=scope, graph=graph, tn_rank=tn_rank, **kwds)
+        for i in range(tn_size):
+            # Build line with random connections
+            parts = [f"-{presented_shape if isinstance(presented_shape, int) else presented_shape[i]}-"]
+            
+            for j, name in enumerate(tensor_names):
+                parts.append(name)
+                if j < len(tensor_names) - 1:
+                    # Random connection: either tn_rank or 0 based on sparsity
+                    bond_value = 0 if np.random.uniform() < real_init_sparsity else tn_rank
+                    if bond_value > 0:
+                        parts.append(f"--{bond_value}--")
+                    else:
+                        parts.append("-----")
+            
+            parts.append(f"-{presented_shape if isinstance(presented_shape, int) else presented_shape[i]}-")
+            lines.append(''.join(parts))
+        
+        graph_string = '\n'.join(lines)
+        
+        return Individual(scope=scope, graph_string=graph_string, tn_rank=tn_rank, **kwds)
 
 
 class Generation:
@@ -354,17 +436,26 @@ class Generation:
         def __str__(self):
             opt_str = f'===== SOCIETY {self.name} =====\n'
             if self.finished:
+                # 已完成评估：显示所有个体的详细信息
+                best_idx = self.indv_ranking[0] if self.indv_ranking else None
                 for idx, indv in enumerate(self.individuals):
-                    if idx == self.indv_ranking[0]: ## the best individual
+                    if idx == best_idx:  ## 最佳个体用红色标记
                         opt_str += LOG_FORMATER.RED_F.format(content=str(indv))
                     else:
                         opt_str += LOG_FORMATER.BLUE_F.format(content=str(indv))
             else:
-                opt_str += f'Current length of indv_to_distribute is {sum(int(i.status.fininshed) for i in self.individuals)}.\n'
-                opt_str += f'Current length of indv_to_collect is {sum(len(i.status.assigned) for i in self.individuals)}.\n'
-                opt_str += f'Current assigned job list: '
+                # 未完成：显示个体状态统计
+                n_finished = sum(int(i.status.finished) for i in self.individuals)
+                n_pending = len(self.individuals) - n_finished
+                
+                opt_str += f'Total individuals: {len(self.individuals)}\n'
+                opt_str += f'Finished: {n_finished}, Pending: {n_pending}\n'
+                
+                # 显示状态详情
+                opt_str += f'Individual status: '
                 for i in self.individuals:
-                    opt_str += f'[{i.scope} => {i.status.assigned}] '
+                    status_str = '✓' if i.status.finished else f'({len(i.report_loss)}/{len(self.individuals)})'
+                    opt_str += f'[{i.scope[-7:]}: {status_str}] '
                 opt_str += '\n'
             return opt_str
 
@@ -391,8 +482,8 @@ class Generation:
                         scope='{}/{}/{:03d}'.format(self.name, k, idx),
                         graph_string=indv.graph.to_string(),  # Convert TNGraph to string
                         parents=(indv.scope,) if indv.parents == () else indv.parents + (indv.scope,),
-                        mutation_prob=self.kwds.get('mutation_prob', 0.1),
-                        tn_rank=self.kwds.get('tn_rank', 2),
+                        # mutation_prob=self.kwds.get('mutation_prob', 0.1),
+                        # tn_rank=self.kwds.get('tn_rank', 2),
                         fitness_func=society.fitness_func,
                         **self.kwds
                     )
@@ -797,11 +888,17 @@ class Generation:
         best_indv = None
         best_score = float('inf')
         
+        self.logger.debug(f'Getting best individual in generation {self.name} from societies {self.societies}.')
+        self.logger.debug(f"Generation {self.name} societies' details: {self.societies.values()}")
+
         for society in self.societies.values():
+            self.logger.debug(f'Checking society {society.name} for best individual, indv_ranking={society.indv_ranking} and individuals count={len(society.individuals)}')
             if society.indv_ranking and society.individuals:
                 best_idx = society.indv_ranking[0]
                 indv = society.individuals[best_idx]
                 
+                self.logger.debug(f'Checking individual {indv.scope} with fitness {indv.fitness_score}')
+
                 if indv.fitness_score and indv.fitness_score < best_score:
                     best_score = indv.fitness_score
                     best_indv = indv
