@@ -51,130 +51,110 @@ class UnitTestQCTN:
 if __name__ == "__main__":
     # Run unit tests for QCTN
 
-    if True:
+    if False:
         print("Testing QCTN Initialization with Example Graph:")
         qctn_example = UnitTestQCTN.test_qctn_initialization()
         
-        # print("\nTesting QCTN Initialization with Random Graph:")
-        # qctn_random = UnitTestQCTN.test_qctn_initialization_with_random_graph()
+        print("\nTesting QCTN Initialization with Random Graph:")
+        qctn_random = UnitTestQCTN.test_qctn_initialization_with_random_graph()
         
-        # print("\nTesting QCTN Contraction with opt_einsum:")
-        # result = UnitTestQCTN.test_qctn_contract_opt_einsum_core_only()
-        # print(f"Contraction Result: {result.shape}")
+        print("\nTesting QCTN Contraction with opt_einsum:")
+        result = UnitTestQCTN.test_qctn_contract_opt_einsum_core_only()
+        print(f"Contraction Result: {result}")
+        print(f"Contraction Result shape: {result.shape}")
 
 
-        # print("\nTesting QCTN Input Contraction with opt_einsum:")
-        # qctn_example = UnitTestQCTN.test_qctn_initialization()
-        # print(f"circuit list: {list(itertools.chain.from_iterable(qctn_example.circuit[0]))}")
-        # print(f"circuit shapes: {[shape for shape in itertools.chain.from_iterable(qctn_example.circuit[0])]}")
-        # inputs = jax.random.normal(jax.random.PRNGKey(0), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
-        # print(f"Contraction Inputs Shape: {inputs.shape}")
-        # result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
-        # print(f"Contraction Result with Inputs: {result}")
-        # print(f"Contraction Result with Inputs: {result.shape}")
+        print("\nTesting QCTN Input Contraction with opt_einsum:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        print(f"circuit list: {list(itertools.chain.from_iterable(qctn_example.circuit[0]))}")
+        print(f"circuit shapes: {[shape for shape in itertools.chain.from_iterable(qctn_example.circuit[0])]}")
+        inputs = jax.random.normal(jax.random.PRNGKey(0), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
+        print(f"Contraction Inputs Shape: {inputs.shape}")
+        result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
+        print(f"Contraction Result with Inputs: {result}")
+        print(f"Contraction Result with Inputs shape: {result.shape}")
 
 
-        # print("\nTesting QCTN Contraction with Another QCTN:")
-        # qctn_example = UnitTestQCTN.test_qctn_initialization()
-        # qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
-        # result = qctn_example.contract(qctn_target, engine=UnitTestQCTN.contraction_engine)
-        # print(f"Contraction Result with Another QCTN: {result}")
+        print("\nTesting QCTN Contraction with Another QCTN:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
+        result = qctn_example.contract(qctn_target, engine=UnitTestQCTN.contraction_engine)
+        print(f"Contraction Result with Another QCTN: {result}")
+        print(f"Contraction Result with Another QCTN shape: {result.shape}")
 
-        # print("\nTesting QCTN Vector Input Contraction with opt_einsum:")
-        # qctn_example = UnitTestQCTN.test_qctn_initialization()
+        print("\nTesting QCTN Vector Input Contraction with opt_einsum:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
 
-        # inputs = [
-        #     jax.random.normal(jax.random.PRNGKey(i), shape)
-        #     for i, shape in enumerate(itertools.chain.from_iterable(qctn_example.circuit[0]))
-        # ]
-        # print(f"Contraction Inputs Shapes: {[inp.shape for inp in inputs]}")
-        # result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
-        # print(f"Contraction Result with Inputs: {result}")
-        # print(f"Contraction Result with Inputs: {result.shape}")
+        inputs = [
+            jax.random.normal(jax.random.PRNGKey(i), shape)
+            for i, shape in enumerate(itertools.chain.from_iterable(qctn_example.circuit[0]))
+        ]
+        print(f"Contraction Inputs Shapes: {[inp.shape for inp in inputs]}")
+        result = qctn_example.contract(inputs, engine=UnitTestQCTN.contraction_engine)
+        print(f"Contraction Result with Inputs: {result}")
+        print(f"Contraction Result with Inputs: {result.shape}")
 
-        # exit()
+        print("\nTesting QCTN Contraction with Another QCTN for gradient:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
+        loss, grads = qctn_example.contract(qctn_target, engine=UnitTestQCTN.contraction_engine)
+        print(f"Gradient: {grads}")
+        print(f"Core shape: {[c.shape for c in qctn_example.cores_weights.values()]}")
+        print(f"Gradient shape: {[g.shape for g in grads]}")
 
-        # print("\nTesting QCTN Contraction with Another QCTN for gradient:")
-        # qctn_example = UnitTestQCTN.test_qctn_initialization()
-        # qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
-        # loss, grads = qctn_example.contract(qctn_target, engine=UnitTestQCTN.contraction_engine)
-        # print(f"Gradient: {grads}")
-        # print(f"Core shape: {[c.shape for c in qctn_example.cores_weights.values()]}")
-        # print(f"Gradient shape: {[g.shape for g in grads]}")
+        print("\nTesting QCTN Contraction with Another QCTN for gradient:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
+        loss, grads = qctn_example.contract_with_QCTN_for_gradient(qctn_target, engine=UnitTestQCTN.contraction_engine)
+        print(f"Gradient: {grads}")
+        print(f"Core shape: {[c.shape for c in qctn_example.cores_weights.values()]}")
+        print(f"Gradient shape: {[g.shape for g in grads]}")
 
-        # exit()
+        print("\nTesting QCTN Contraction with self")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        inputs = jax.random.normal(jax.random.PRNGKey(0), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
+        loss, grads = qctn_example.contract_with_self(inputs, engine=UnitTestQCTN.contraction_engine)
+        print(f"Gradient: {grads}")
+        print(f"Core shape: {[c.shape for c in qctn_example.cores_weights.values()]}")
+        print(f"Gradient shape: {[g.shape for g in grads]}")
 
-        # print("\nTesting QCTN Contraction with Another QCTN for gradient:")
-        # qctn_example = UnitTestQCTN.test_qctn_initialization()
-        # qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
-        # loss, grads = qctn_example.contract_with_QCTN_for_gradient(qctn_target, engine=UnitTestQCTN.contraction_engine)
-        # print(f"Gradient: {grads}")
-        # print(f"Core shape: {[c.shape for c in qctn_example.cores_weights.values()]}")
-        # print(f"Gradient shape: {[g.shape for g in grads]}")
+        print("\nTesting Optimizer with self:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        print("\nqctn_example:", qctn_example)
 
-        # exit()
+        num_train_samples = 100
 
-        # print("\nTesting QCTN Contraction with self")
-        # qctn_example = UnitTestQCTN.test_qctn_initialization()
-        # inputs = jax.random.normal(jax.random.PRNGKey(0), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
-        # loss, grads = qctn_example.contract_with_self(inputs, engine=UnitTestQCTN.contraction_engine)
-        # print(f"Gradient: {grads}")
-        # print(f"Core shape: {[c.shape for c in qctn_example.cores_weights.values()]}")
-        # print(f"Gradient shape: {[g.shape for g in grads]}")
+        inputs_list = []
+        for i in range(num_train_samples):
+            input = jax.random.normal(jax.random.PRNGKey(i), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
+            input_norm = jnp.sqrt((input ** 2).sum())
+            input = input / input_norm
+            inputs_list += [input]
 
-        # exit()
+        print("\ninputs_list shapes:", [inp.shape for inp in inputs_list])
+        print("\ninputs_list mean:", [inp.mean() for inp in inputs_list])
+        print("\ninputs_list var:", [inp.var() for inp in inputs_list])
 
-    print("\nTesting Optimizer with QCTN:")
-    qctn_example = UnitTestQCTN.test_qctn_initialization()
-    print("\nqctn_example:", qctn_example)
+        optimizer = Optimizer(method='adam', max_iter=2000, tol=1e-6, learning_rate=1e-3, beta1=0.9, beta2=0.95, epsilon=1e-8)
+        optimizer.optimize_self_with_inputs(qctn_example, inputs_list)
 
-    inputs_list = []
-    for i in range(10):
-        input = jax.random.normal(jax.random.PRNGKey(i), list(itertools.chain.from_iterable(qctn_example.circuit[0])))
-        input_norm = jnp.sqrt((input ** 2).sum())
-        input = input / input_norm
-        inputs_list += [input]
+        test_loss_list = []
+        for i in range(num_train_samples):
+            loss, grads = qctn_example.contract_with_self_for_gradient(inputs_list[i], engine=UnitTestQCTN.contraction_engine)
+            print(f"Final Loss {i}: {loss}, input sqr_sum {(inputs_list[i] ** 2).sum()}")
+            test_loss_list.append(loss)
+        print(f"Average Loss: {sum(test_loss_list) / num_train_samples}")
+        print(f"Max Loss: {max(test_loss_list)}")
 
-        # inputs_list += [jax.random.normal(jax.random.PRNGKey(i), list(itertools.chain.from_iterable(qctn_example.circuit[0])))]
-    
-    print("\ninputs_list shapes:", [inp.shape for inp in inputs_list])
-    print("\ninputs_list mean:", [inp.mean() for inp in inputs_list])
-    print("\ninputs_list var:", [inp.var() for inp in inputs_list])
-
-    # for i in range(10):
-    #     loss, grads = qctn_example.contract_with_self_for_gradient(inputs_list[0], engine=UnitTestQCTN.contraction_engine)
-    #     print(f"Final Loss {i}: {loss}, input sqr_sum {(inputs_list[i] ** 2).sum()} \n{inputs_list[i]}")
-    # exit()
-
-    optimizer = Optimizer(method='adam', max_iter=1000, tol=1e-6, learning_rate=0.1, beta1=0.9, beta2=0.95, epsilon=1e-8)
-    optimizer.optimize_self_with_inputs(qctn_example, inputs_list)
-
-    for i in range(10):
-        loss, grads = qctn_example.contract_with_self_for_gradient(inputs_list[0], engine=UnitTestQCTN.contraction_engine)
-        print(f"Final Loss {i}: {loss}, input sqr_sum {(inputs_list[i] ** 2).sum()} \n{inputs_list[i]}")
-    exit()
-
-
-    # loss, grads = qctn_example.contract_with_self_for_gradient(inputs_list, engine=UnitTestQCTN.contraction_engine)
-    # print(f"Final Loss: {loss}")
-    
-    exit()
-
-    print("\nTesting Optimizer with QCTN:")
-    qctn_example = UnitTestQCTN.test_qctn_initialization()
-    print("\nqctn_example:", qctn_example)
-    qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
-    print("\nqctn_target:", qctn_target)
-    optimizer = Optimizer(method='adam', max_iter=1000, tol=1e-6, learning_rate=0.1, beta1=0.9, beta2=0.95, epsilon=1e-8)
-    optimizer.optimize(qctn_example, qctn_example)
-    loss, grads = qctn_example.contract_with_QCTN_for_gradient(qctn_example, engine=UnitTestQCTN.contraction_engine)
-    print(f"Final Loss: {loss}")
-    
-    # Further tests can be added here
-    print("\nAll tests completed.")
-
-    exit()
-
+        print("\nTesting Optimizer with QCTN:")
+        qctn_example = UnitTestQCTN.test_qctn_initialization()
+        print("\nqctn_example:", qctn_example)
+        qctn_target = UnitTestQCTN.test_qctn_initialization(traget=True)
+        print("\nqctn_target:", qctn_target)
+        optimizer = Optimizer(method='adam', max_iter=1000, tol=1e-6, learning_rate=0.1, beta1=0.9, beta2=0.95, epsilon=1e-8)
+        optimizer.optimize(qctn_example, qctn_example)
+        loss, grads = qctn_example.contract_with_QCTN_for_gradient(qctn_example, engine=UnitTestQCTN.contraction_engine)
+        print(f"Final Loss: {loss}")
 
     print("\nTesting Optimizer with QCTN:")
     qctn_example = UnitTestQCTN.test_qctn_initialization()

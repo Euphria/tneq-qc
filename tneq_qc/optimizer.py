@@ -27,6 +27,42 @@ class Optimizer:
         self.epsilon = epsilon
         self.iter = 0
 
+    # def optimize(self, qctn, **kwargs):
+    #     """
+    #     Optimize a function using JAX.
+        
+    #     Args:
+    #         qctn (QCTN): The quantum circuit tensor network to optimize.
+    #         kwargs: Additional arguments for different optimization modes.
+
+    #     Returns:
+    #         None: The function modifies the qctn in place.
+    #     """
+
+    #      while self.iter < self.max_iter:
+            
+    #         loss, grads = qctn.contract_with_QCTN_for_gradient(target_qctn)
+
+    #         if self.tol and loss < self.tol:
+    #             print(f"Convergence achieved at iteration {self.iter} with loss {loss}.")
+    #             break
+
+    #         # Update parameters using the optimizer step
+    #         qctn.params = self.step(qctn, grads)
+    #         self.iter += 1
+    #     else:
+    #         print(f"Maximum iterations reached: {self.max_iter} with final loss {loss}.")
+
+
+    #     if 'target_qctn' in kwargs:
+    #         self.optimize(qctn, target_qctn=kwargs['target_qctn'])
+    #     elif 'inputs_list' in kwargs:
+    #         self.optimize_self_with_inputs(qctn, inputs_list=kwargs['inputs_list'])
+    #     elif 'circuit_array_input' in kwargs:
+    #         self.optimize_self_with_inputs(qctn, inputs_list=[kwargs['circuit_array_input']])
+    #     else:
+    #         raise ValueError("No valid optimization mode provided.")
+
     def optimize(self, qctn, target_qctn):
         """
         Optimize a function using JAX.
@@ -204,6 +240,7 @@ class Optimizer:
             qctn.v = {c: jnp.zeros_like(w) for c, w in qctn.cores_weights.items()}
 
         for idx, c in enumerate(qctn.cores):
+
             # Update biased first moment estimate
             qctn.m[c] = self.beta1 * qctn.m[c] + (1 - self.beta1) * grads[idx]
             

@@ -39,10 +39,52 @@ class QCTNHelper:
                     "-2-----B-6-----D-----2-\n" \
                     "-2-A-3-----C-8-D-----2-"
         else:
-            return  "-2-A-2-"
+            # return  "-2-A-2-"
+            # return  "-2-A-3-B-4-C-3-D-2-"
         
-            return  "-2-A-2-\n" \
-                    "-2-A-2-"
+            # return  "-2-A-2-\n" \
+            #         "-2-A-2-"
+
+            return  "-2-A-------------------4-\n" \
+                    "-2-A--3--B-------------4-\n" \
+                    "-2-------B--3--C-------4-\n" \
+                    "-2-------------C--3--D-4-\n" \
+                    "-2-------------------D-4-"
+
+
+            return  "-2-A-5-----C-3-----E-2-\n" \
+                    "-2-----B----4------E-2-\n" \
+                    "-2-A-4-B-7-C-2-D-4-E-2-\n" \
+                    "-2-----B-6-----D-----2-\n" \
+                    "-2-A-3-----C-8-D-----2-"
+        
+            return  "-2-A--------5--C--5--D-5-\n" \
+                    "-2-A--5--B--------5--D-5-\n" \
+                    "-2-------B--5--C--5--D-5-"
+        
+            return  "-2-A--------2--C--2--D-2-\n" \
+                    "-2-A--2--B--------2--D-2-\n" \
+                    "-2-------B--2--C--2--D-2-"
+        
+
+            return  "-2-A--------5--C--7--D--9--E--9--F--------9-\n" \
+                    "-2-A--3--B--------7--D--------9--F--7--G-9-\n" \
+                    "-2-------B--5--C--7--D--9--E--------9--G-9-"
+        
+
+            return  "-2-A--------5--C--------9--E--9--F--7-----9--H-9-\n" \
+                    "-2-A--3--B--5--C--7--D--9--E--9--F--7--G--9--H-9-\n" \
+                    "-2-------B--------7--D--9--E--9--------G-------9-"
+
+
+            return  "-2-A--------5--C-------7-\n" \
+                    "-2-A--3--B--5--C--7--D-9-\n" \
+                    "-2-------B--------7--D-9-"
+        
+            return  "-2-A--------5--C-------5-\n" \
+                    "-2-A--5--B--5--C--5--D-5-\n" \
+                    "-2-------B--------5--D-5-"
+
         
             return  "-2-A-------------------2-\n" \
                     "-2-A--2--B-------------2-\n" \
@@ -68,9 +110,6 @@ class QCTNHelper:
             -2-------------C--2--D-2-
             -2-------------------D-2-
             """
-            
-
-
 
 
     @staticmethod
@@ -282,7 +321,8 @@ class QCTN:
             adjacency_ranks = self.adjacency_matrix[idx, :]
 
             core_shape = input_rank + list(itertools.chain.from_iterable(adjacency_ranks)) + output_rank
-            core = jax.random.normal(self.initialize_random_key, shape=core_shape) * Configuration.initialize_variance          
+            core = jax.random.normal(self.initialize_random_key, shape=core_shape) * Configuration.initialize_variance      
+
             self.cores_weights[core_name] = core
 
     def _contract_core_only(self, engine=ContractorOptEinsum):

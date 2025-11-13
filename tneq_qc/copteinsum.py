@@ -377,6 +377,7 @@ class ContractorOptEinsum:
         Returns:
             jnp.ndarray: The result of the tensor contraction.
         """
+        
 
         input_ranks, adjacency_matrix, output_ranks = qctn.circuit
         cores_name = qctn.cores
@@ -451,7 +452,7 @@ class ContractorOptEinsum:
 
             inv_equation_list.append(new_equation)
 
-        equation_list = equation_list + inv_equation_list
+        equation_list += inv_equation_list
 
         einsum_equation_lefthand = ",".join(equation_list)
 
@@ -466,8 +467,9 @@ class ContractorOptEinsum:
             #     expected_input_rank = len(input_ranks[idx])
             #     if circuit_array_input[idx].ndim != expected_input_rank:
             #         raise ValueError(f'circuit_array_input[{idx}] has shape {circuit_array_input[idx].shape}, expected input rank {expected_input_rank}')
-            
-            einsum_equation_lefthand = f"{''.join(input_symbols_stack)},{einsum_equation_lefthand},{''.join(real_output_symbols_stack)}"
+            einsum_equation_output = ''.join(real_output_symbols_stack)
+
+            einsum_equation_lefthand = f"{''.join(input_symbols_stack)},{einsum_equation_lefthand},{einsum_equation_output}"
 
         einsum_equation = f'{einsum_equation_lefthand}->'
 
@@ -494,7 +496,7 @@ class ContractorOptEinsum:
             return qctn.einsum_expr
 
         inputs_cores =  [cores_weights[core_name] for core_name in cores_name] + \
-                        [cores_weights[core_name] for core_name in cores_name[::-1]]  
+                        [cores_weights[core_name] for core_name in cores_name[::-1]]
         
         if circuit_array_input is not None:
             inputs_cores = [circuit_array_input] + inputs_cores + [circuit_array_input]
@@ -511,16 +513,12 @@ class ContractorOptEinsum:
         """
         We use JAX's autograd to compute the core gradient.
         """
-
         cores_name = qctn.cores
         cores_weights = qctn.cores_weights
 
-        if qctn.einsum_expr is None:
-            print('cores_weights', cores_weights)
-            cores_weights['A'] = jnp.array([[0, -1], [1, 0]])
-
         inputs_cores =  [cores_weights[core_name] for core_name in cores_name] + \
                         [cores_weights[core_name] for core_name in cores_name[::-1]]
+
         if circuit_array_input is not None:
             inputs_cores = [circuit_array_input] + inputs_cores + [circuit_array_input]
 
@@ -533,19 +531,25 @@ class ContractorOptEinsum:
         if qctn.einsum_expr is None:
             ContractorOptEinsum.contract_with_self(qctn, circuit_array_input=circuit_array_input, initialization_mode=True)
             argnums = list(range(len(cores_name)))
+            if circuit_array_input is not None:
+                argnums = list(range(len(cores_name) + 2))  # +2 for the circuit_array_input at start and end
 
             qctn.jit_retraction_with_self_value_gradient = jax.jit(jax.value_and_grad(mse_loss_fn, 
                                                                                       argnums=argnums))
 
         loss, grad_cores = qctn.jit_retraction_with_self_value_gradient(*inputs_cores)
         
-        local_print('inputs_cores', [x.shape for x in inputs_cores])
-        local_print('mean', [x.mean() for x in inputs_cores])
-        local_print('var', [x.var() for x in inputs_cores])
+        if circuit_array_input is not None:
+            grad_cores = grad_cores[1:-1]  # Remove gradients for circuit_array_input
+
+        # local_print('inputs_cores', [x.shape for x in inputs_cores])
+        # local_print('mean', [x.mean() for x in inputs_cores])
+        # local_print('var', [x.var() for x in inputs_cores])
+        # local_print('grad_cores', [x.shape for x in grad_cores])
 
         local_print(f'Loss: {loss}')
         
-        local_print(f"-"*70)
+        # local_print(f"-"*70)
 
         return loss, grad_cores
 
