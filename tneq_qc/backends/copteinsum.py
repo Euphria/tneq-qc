@@ -269,7 +269,7 @@ class ContractorOptEinsum:
         adjacency_matrix_for_interaction = adjacency_matrix.copy()
         local_print(f'adjacency_matrix for interaction: \n{adjacency_matrix_for_interaction}')
         
-        from ..tenmul_qc import QCTNHelper
+        from ..core.tenmul_qc import QCTNHelper
         for element in QCTNHelper.jax_triu_ndindex(len(cores_name)):
             i, j = element
             if adjacency_matrix_for_interaction[i, j]:
