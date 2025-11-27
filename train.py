@@ -1,3 +1,4 @@
+import time
 from tneq_qc.config import Configuration
 from tneq_qc.core.tenmul_qc import QCTN, QCTNHelper
 from tneq_qc.core.cqctn import ContractorQCTN
@@ -78,6 +79,10 @@ def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
 
         out = weights * torch.sqrt(torch.exp(- torch.square(x) / 2))[:, :, None] * out
 
+        print(f'phi_x.shape {out.shape}')
+        out_norm = torch.sum(out * out, dim=-1)
+        out = out / torch.sqrt(out_norm)[:, :, None]
+
         # print(f"out after weighting and scaling: {out}, out.shape: {out.shape}")
         einsum_expr = "abc,abd->abcd"
         Mx = torch.einsum(einsum_expr,
@@ -118,44 +123,147 @@ if __name__ == "__main__":
     print(f"qctn_graph: \n{qctn_graph}")
     qctn = QCTN(qctn_graph, backend_info=executor.backend.backend_info)
 
-    N = 10
-    B = 1
+    N = 1
+    B = 4
     D = qctn.nqubits
     K = 3
 
     data_list = generate_Mx_phi_x_data(num_batch=N, batch_size=B, num_qubits=D, K=K)
 
+    print('data_list[0] shape:', data_list[0][-1].shape)
+
+    # for i in range(B):
+    #     phi_x = data_list[0][-1][i]
+    #     for j in range(D):
+    #         phi_x_j = phi_x[j]
+    #         norm = torch.sum(phi_x_j * phi_x_j)
+    #         print(f"Batch {i}, Qubit {j}, Norm of phi_x_j: {norm.item()}")
+    #     print(f"phi_x for batch {i}: {phi_x} shape: {phi_x.shape}")
+
     data_list = [
-        {"measure_input": x[0], "measure_is_matrix": True} for x in data_list
+        {
+            "measure_input_list": x[0], 
+            # "measure_is_matrix": True,
+        } for x in data_list
     ]
 
     circuit_states_list = generate_circuit_states_list(num_qubits=D, K=K)
 
+    # torch profiler memory usage test
+    import torch.profiler
+
+    # torch.cuda.empty_cache()
+    # with torch.profiler.profile(
+    #     activities=[
+    #         torch.profiler.ProfilerActivity.CPU,
+    #         torch.profiler.ProfilerActivity.CUDA,
+    #     ],
+    #     schedule=torch.profiler.schedule(
+    #         wait=1,
+    #         warmup=1,
+    #         active=3),
+    #     # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log/tneq_qc_run'),
+    #     record_shapes=True,
+    #     profile_memory=True,
+    #     with_stack=True
+    # ) as prof:
+    #     for step in range(100):
+    #         with torch.no_grad():
+    #             result = executor.contract_with_self(qctn, 
+    #                                                 circuit_states=circuit_states_list,
+    #                                                 measure_input=data_list[0]["measure_input_list"], 
+    #                                                 measure_is_matrix=True,
+    #                                                 )
+    #         prof.step()
+    # print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
+
+    # torch.cuda.empty_cache()
+    # with torch.profiler.profile(
+    #     activities=[
+    #         # torch.profiler.ProfilerActivity.CPU,
+    #         torch.profiler.ProfilerActivity.CUDA,
+    #     ],
+    #     schedule=torch.profiler.schedule(
+    #         wait=1,
+    #         warmup=1,
+    #         active=3),
+    #     # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log/tneq_qc_run'),
+    #     record_shapes=True,
+    #     profile_memory=True,
+    #     with_stack=True
+    # ) as prof:
+    #     for step in range(10):
+    #         with torch.no_grad():
+    #             result = executor.contract_with_std_graph(qctn,
+    #                                                     circuit_states_list=circuit_states_list,
+    #                                                     measure_input_list=data_list[0]["measure_input_list"],
+    #                                                     )
+    #         prof.step()
+    # print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
+
+    # torch.cuda.empty_cache()
+    # with torch.no_grad():
+    #     result = executor.contract_with_self(qctn, 
+    #                                         circuit_states=circuit_states_list,
+    #                                         measure_input=data_list[0]["measure_input_list"], 
+    #                                         measure_is_matrix=True,
+    #                                         )
+    # print(f"Initial Result: {[result[x].item() for x in range(10)]}")
+
+    # print(f"已分配显存: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    # print(f"缓存显存: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+
+    # exit()
+
+    # torch.cuda.empty_cache()
+    # with torch.no_grad():
+    #     # for i in range(10):
+    #     result = executor.contract_with_std_graph(qctn,
+    #                                             circuit_states_list=circuit_states_list,
+    #                                             measure_input_list=data_list[0]["measure_input_list"],
+    #                                             )
+    # print(f"Initial Result (std graph): {[result[x].item() for x in range(10)]}")
+
+    # print(f"已分配显存: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    # print(f"缓存显存: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+
+    # exit()
+
     optimizer = Optimizer(
-        method='adam', 
-        max_iter=10000, 
+        method='sgdg', 
+        max_iter=1000, 
         # tol=1e-6, 
         tol=0.0, 
-        learning_rate=1e-1, 
+        learning_rate=1e-2, 
         beta1=0.9, 
         beta2=0.95, 
         epsilon=1e-8,
         executor=executor,
+
+        momentum=0.9,            # 动量因子
+        stiefel=True,            # 启用 Stiefel 流形优化
     )
     
     torch.cuda.empty_cache()
+    
+    tic = time.time()
 
     optimizer.optimize(qctn, 
                        data_list=data_list, 
-                       circuit_states=circuit_states_list,
+                    #    circuit_states=circuit_states_list,
+                       circuit_states_list=circuit_states_list,
                        )
 
-
+    toc = time.time()
+    
+    print(f"已分配显存: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    print(f"缓存显存: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+    print(f"Optimization Time: {toc - tic:.2f} seconds")
 
     # Choose the first data of each batch for testing
     test_loss_list = []
     for i in range(N):
-        data_slice = [x[0:1] for x in data_list[i]["measure_input"]]
+        data_slice = [x[0:1] for x in data_list[i]["measure_input_list"]]
         result = executor.contract_with_self(qctn, 
                                              circuit_states=circuit_states_list,
                                              measure_input=data_slice, 

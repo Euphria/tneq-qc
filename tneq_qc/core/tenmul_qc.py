@@ -1,4 +1,5 @@
 import jax
+import torch
 import numpy as np
 import jax.numpy as jnp
 import itertools
@@ -41,28 +42,33 @@ class QCTNHelper:
         else:
             def generate_std_graph(n):
                 graph = ""
-                char_list = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
-                
+                # char_list = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
+                # char_list = [next(QCTNHelper.iter_symbols(True)) for _ in range(n)]
+                import opt_einsum
+                char_list = [opt_einsum.get_symbol(i) for i in range(n)]
+
+                dim_char = '3'
+
                 for i in range(n):
                     cid = i - 1
                     nid = i
                     if i == 0:
-                        line = "-3-" + char_list[i] + (n - 2) * 6 * "-" + "-3-"
+                        line = f"-{dim_char}-" + char_list[i] + (n - 2) * 6 * "-" + f"-{dim_char}-"
                     elif i == n - 1:
-                        line = "-3-" + (n - 2) * 6 * "-" + char_list[cid] + "-3-"
+                        line = f"-{dim_char}-" + (n - 2) * 6 * "-" + char_list[cid] + f"-{dim_char}-"
                     else:
-                        line = "-3-"
+                        line = f"-{dim_char}-"
                         line += cid * 6 * "-"
                         line += char_list[cid]
-                        line += "--3--"
+                        line += f"--{dim_char}--"
                         line += char_list[nid]
                         line += (n - nid - 2) * 6 * "-"
-                        line += "-3-"
+                        line += f"-{dim_char}-"
                     
                     graph += line + "\n"
                 return graph
 
-            return generate_std_graph(5)
+            return generate_std_graph(4)
         
             # return  "-3-A-3-"
             # return  "-3-A-3-B-3-C-3-D-3-"
@@ -85,11 +91,23 @@ class QCTNHelper:
             #         "-3-A-3-\n" \
             #         "-3-A-3-\n" \
             #         "-3-A-3-"
+            return  "-3-a-----3-c---------3-\n" \
+                    "-3-a-3-b-------------3-\n" \
+                    "-3-a-3-b-3-c---------3-\n" \
+                    "-3-----b-3-c---------3-"
         
-            # return  "-3-A-------------3-\n" \
-            #         "-3-A--3--B-------3-\n" \
-            #         "-3-------B--3--C-3-\n" \
-            #         "-3-------------C-3-\n"
+            return  "-3-a-3-----c-3-d-3-e-3-\n" \
+                    "-3-a-3-b-3-----d-3-e-3-\n" \
+                    "-3-a-3-b-3-c-3-----e-3-\n" \
+                    "-3-----b-3-c-3-d-3-e-3-"
+        
+            return  "-3-a-----------------3-\n" \
+                    "-3-a-3-b-------------3-\n" \
+                    "-3-----b-3-c---------3-\n" \
+                    "-3---------c---------3-"
+            
+        
+            
 
             # return  "-3-A-------------------3-\n" \
             #         "-3-A--3--B-------------3-\n" \
@@ -242,10 +260,15 @@ class QCTN:
         self.graph = graph
         self.qubits = graph.strip().splitlines()
         self.nqubits = len(self.qubits)
-        self.cores = list(set([c for c in graph if c.isupper()]))
-        if not self.cores:
-            # If no uppercase core symbols found, try to find all chars in the CJK Unified Ideographs range
-            self.cores = list(set([c for c in graph if 0x4E00 <= ord(c) <= 0x9FFF]))
+        
+        import opt_einsum
+
+        self.cores = [opt_einsum.get_symbol(i) for i in range(self.nqubits-1)]
+
+        # self.cores = list(set([c for c in graph if c.isupper()]))
+        # if not self.cores:
+        #     # If no uppercase core symbols found, try to find all chars in the CJK Unified Ideographs range
+        #     self.cores = list(set([c for c in graph if 0x4E00 <= ord(c) <= 0x9FFF]))
         self.ncores = len(self.cores)
 
         self.cores = sorted(self.cores)
@@ -390,13 +413,39 @@ class QCTN:
 
             core_shape = input_rank + list(itertools.chain.from_iterable(adjacency_ranks)) + output_rank
 
-            if self.backend_info is not None and self.backend_info.backend_type == 'pytorch':
-                import torch
-                core = torch.randn(core_shape, device=self.backend_info.device) * Configuration.initialize_variance
-            else:
-                core = jax.random.normal(self.initialize_random_key, shape=core_shape) * Configuration.initialize_variance      
+            # 取core_shape的前一半，乘起来作为flat_dim
+            flat_dim = np.prod(core_shape[:len(core_shape)//2])
+
+            random_matrix = torch.randn((flat_dim, flat_dim), device=self.backend_info.device)
+
+            Q, R = torch.linalg.qr(random_matrix)
+
+            d = torch.diag(R)
+            sign_correction = torch.sign(d)
+            Q = Q * sign_correction.unsqueeze(0)
+
+            core = Q.reshape(core_shape)
 
             self.cores_weights[core_name] = core
+
+            # print(f"Initialized core {core_name} with shape {core_shape} core: \n{core}")
+
+            # # 检查core是不是正交矩阵
+            # core_reshaped = core.reshape((flat_dim, flat_dim))
+            # identity = torch.matmul(core_reshaped.T, core_reshaped)
+            # # identity > 0.999 = 1.0， < 1e-6 = 0.0
+            # identity = torch.where(torch.abs(identity) > 0.999, torch.ones_like(identity), identity)
+            # identity = torch.where(torch.abs(identity) < 1e-6, torch.zeros_like(identity), identity)
+            # print(f"Core {core_name} orthogonality check (should be identity): \n{identity}")
+
+            # if self.backend_info is not None and self.backend_info.backend_type == 'pytorch':
+            #     import torch
+            #     core = torch.randn(core_shape, device=self.backend_info.device) * Configuration.initialize_variance
+            # else:
+            #     core = jax.random.normal(self.initialize_random_key, shape=core_shape) * Configuration.initialize_variance      
+
+            # self.cores_weights[core_name] = core
+        # exit()
 
     def _contract_core_only(self, engine=ContractorOptEinsum):
         """

@@ -18,6 +18,9 @@ class Optimizer:
                        beta2=0.999, # Adam's second moment estimate decay rate
                        epsilon=1e-8, # Small constant to prevent division by zero
                        executor=None,
+                       # SGDG parameters
+                       momentum=0.0, # Momentum factor for SGDG
+                       stiefel=True, # Whether to use Stiefel manifold optimization
                   ):
 
         self.method = method
@@ -28,6 +31,8 @@ class Optimizer:
         self.beta2 = beta2
         self.epsilon = epsilon
         self.iter = 0
+        self.momentum = momentum
+        self.stiefel = stiefel
 
         self.executor = executor
 
@@ -45,7 +50,8 @@ class Optimizer:
         while self.iter < self.max_iter:
             # TODO: impl general function named contract_for_gradient
             data_index = self.iter % len(data_list)
-            loss, grads = self.executor.contract_with_self_for_gradient(qctn, **data_list[data_index], **kwargs)
+            # loss, grads = self.executor.contract_with_self_for_gradient(qctn, **data_list[data_index], **kwargs)
+            loss, grads = self.executor.contract_with_std_graph_for_gradient(qctn, **data_list[data_index], **kwargs)
 
             # Convert loss to scalar for comparison and printing
             loss_value = float(loss) if hasattr(loss, 'item') else loss
@@ -67,8 +73,8 @@ class Optimizer:
                         if grad > max_grad:
                             max_grad = grad
                 
-                    # if max_grad < 1e-2:
-                    #     self.learning_rate = self.learning_rate * 0.1 / (max_grad + 1e-30)
+                    if max_grad < 1e-2:
+                        self.learning_rate = self.learning_rate * 1e-1 / (max_grad + 1e-30)
                         
                 qctn.params = self.step(qctn, grads)
 
@@ -235,6 +241,8 @@ class Optimizer:
             self.adam_step(qctn, grads)
         elif self.method == 'sgd':
             self.sgd_step(qctn, grads)
+        elif self.method == 'sgdg':
+            self.sgdg_step(qctn, grads)
         elif self.method == 'momentum':
             self.momentum_step(qctn, grads)
         elif self.method == 'nesterov':
@@ -364,4 +372,131 @@ class Optimizer:
             # Update parameters (create new tensor instead of in-place operation)
             update = self.learning_rate * m_hat / (sqrt_v_hat + self.epsilon)
             qctn.cores_weights[c] = qctn.cores_weights[c] - update
+
+    def sgdg_step(self, qctn, grads):
+        """
+        Perform a single SGDG (SGD on Stiefel manifold) optimization step.
+        
+        This method updates parameters while maintaining orthogonality constraints
+        using Cayley transform on the Stiefel manifold.
+        
+        Args:
+            qctn (QCTN): The quantum circuit tensor network to optimize.
+            grads (array-like): The gradients computed from the loss function.
+
+        Returns:
+            None: The function modifies the qctn parameters in place.
+        """
+        device = self.executor.backend.backend_info.device
+        
+        # Initialize momentum buffers if not already done
+        if not hasattr(qctn, 'momentum_buffer'):
+            qctn.momentum_buffer = {}
+        
+        epsilon = 1e-8
+        
+        for idx, c in enumerate(qctn.cores):
+            grad = grads[idx]
+            param = qctn.cores_weights[c]
+            
+            # Check if parameter satisfies Stiefel constraint (rows <= cols after reshape)
+            param_shape = param.shape
+            
+            # For tensors with more than 2 dimensions, reshape to matrix
+            if len(param_shape) > 2:
+                # Reshape similar to SGDG: flatten first dimensions
+                flat_dim = torch.prod(torch.tensor(param_shape[:len(param_shape)//2]))
+                param_2d = param.reshape(flat_dim, -1)
+                grad_2d = grad.reshape(flat_dim, -1)
+            else:
+                param_2d = param
+                grad_2d = grad
+            
+            # Normalize to get orthogonal matrix
+            unity, unity_norm = self._unit(param_2d)
+            
+            # Check if we should use Stiefel optimization
+            if self.stiefel and unity.shape[0] <= unity.shape[1]:
+                # Randomly apply QR retraction for numerical stability (1% chance)
+                if random.randint(1, 101) == 1:
+                    unity = self._qr_retraction(unity)
+                
+                # Initialize momentum buffer for this core
+                if c not in qctn.momentum_buffer:
+                    qctn.momentum_buffer[c] = torch.zeros(grad_2d.T.shape, device=device)
+                
+                V = qctn.momentum_buffer[c]
+                
+                # Update momentum: V = momentum * V - g^T
+                V = self.momentum * V - grad_2d.T
+                
+                # Compute the skew-symmetric matrix W
+                MX = torch.mm(V, unity)
+                XMX = torch.mm(unity, MX)
+                XXMX = torch.mm(unity.T, XMX)
+                
+                W_hat = MX - 0.5 * XXMX
+                W = W_hat - W_hat.T  # Make it skew-symmetric
+                
+                # Compute adaptive step size
+                W_norm = self._matrix_norm_one(W)
+                t = 0.5 * 2 / (W_norm + epsilon)
+                alpha = min(t, self.learning_rate)
+                
+                # Apply Cayley transform: Y(alpha) = (I - alpha/2 * W)^{-1} (I + alpha/2 * W) X
+                p_new = self._compute_cayley_transform(alpha, W, unity.T).T
+                
+                # Reshape back to original shape
+                if len(param_shape) > 2:
+                    p_new = p_new.reshape(param_shape)
+                
+                # Update parameter
+                qctn.cores_weights[c] = p_new
+                
+                # Update momentum buffer
+                V_new = torch.mm(W, unity.T)
+                qctn.momentum_buffer[c] = V_new
+                
+            else:
+                # Standard SGD update for non-Stiefel parameters
+                qctn.cores_weights[c] = param - self.learning_rate * grad
+    
+    # Helper functions for SGDG
+    def _unit(self, v, dim=1, eps=1e-8):
+        """Normalize a matrix to have unit norm."""
+        vnorm = torch.norm(v, p=2, dim=dim, keepdim=True)
+        return v / (vnorm + eps), vnorm
+    
+    def _qr_retraction(self, tan_vec):
+        """QR retraction to project back onto Stiefel manifold."""
+        tan_vec_T = tan_vec.T
+        q, r = torch.linalg.qr(tan_vec_T, mode='reduced')
+        d = torch.diag(r)
+        ph = torch.sign(d)
+        q = q * ph.unsqueeze(0)
+        return q.T
+    
+    def _matrix_norm_one(self, W):
+        """Compute matrix 1-norm (maximum absolute column sum)."""
+        return torch.abs(W).sum(dim=0).max()
+    
+    def _compute_cayley_transform(self, alpha, W, X):
+        """
+        Compute Cayley transform: Y(alpha) = (I - alpha/2 * W)^{-1} (I + alpha/2 * W) X
+        
+        Args:
+            alpha: Step size
+            W: Skew-symmetric matrix
+            X: Current point on manifold
+            
+        Returns:
+            Updated point Y(alpha)
+        """
+        I = torch.eye(W.shape[0], device=W.device)
+        left_matrix = I - (alpha / 2) * W
+        right_matrix = I + (alpha / 2) * W
+        left_inv = torch.inverse(left_matrix)
+        Y_alpha = left_inv @ right_matrix @ X
+        
+        return Y_alpha
         

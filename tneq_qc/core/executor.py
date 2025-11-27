@@ -198,6 +198,9 @@ class ContractExecutor:
         einsum_eq, tensor_shapes = self.contractor.build_with_self_expression(
             qctn, states_shape, measure_shape, measure_is_matrix
         )
+
+        # print(f'ori einsum_eq : {einsum_eq}')
+        # einsum_eq = "c,d,f,h,cdea,afgb,bhji,kel,kgm,kjo,kin,qpon,srmq,utls,p,r,t,u->k"
         
         # Create optimized expression if not cached
         cache_key = f'_contract_expr_self_{states_shape}_{measure_shape}_{measure_is_matrix}'
@@ -299,19 +302,19 @@ class ContractExecutor:
             setattr(qctn, cache_key, expr)
         else:
             expr = getattr(qctn, cache_key)
-        
+
         # Define loss function
         def loss_fn(*tensors):
             jit_fn = self.backend.jit_compile(expr)
             result = self.backend.execute_expression(jit_fn, *tensors)
             # Compute MSE loss
-            # diff = result - 1.0
-            # return (diff * diff).mean()
+            diff = result - 1.0
+            return (diff * diff).mean()
 
             # compute cross entropy loss
-            target = torch.ones_like(result)
-            log_result = torch.log(result + 1e-10)
-            return -torch.mean(target * log_result)
+            # target = torch.ones_like(result)
+            # log_result = torch.log(result + 1e-10)
+            # return -torch.mean(target * log_result)
 
         # Determine which arguments to compute gradients for
         # Skip circuit_states and measure_input, only compute gradients for cores
@@ -431,5 +434,355 @@ class ContractExecutor:
         
         # Compute value and gradients
         loss, grads = value_and_grad_fn(*tensors)
+        
+        return loss, grads
+
+    def contract_with_std_graph_mini(self, qctn, circuit_states_list, measure_input_list):
+        """
+        Contract QCTN using standard graph method with pre-contracted circuit states.
+        
+        This method first contracts circuit_states with cores to create 
+        cores_weight_with_circuit_states, then uses those for efficient computation.
+        
+        Args:
+            qctn (QCTN): The quantum circuit tensor network to contract.
+            circuit_states_list (list): List of circuit input states (one per qubit).
+                Each element is a tensor representing the state of one qubit.
+            measure_input_list (list): List of measurement input matrices.
+                Each element is a matrix (not vector) for measurement.
+        
+        Returns:
+            Backend tensor: Result of the contraction.
+        """
+        
+        # Ensure inputs are lists
+        assert isinstance(circuit_states_list, list), "circuit_states_list must be a list"
+        assert isinstance(measure_input_list, list), "measure_input_list must be a list"
+        
+        # Step 1: Initialize cores_weight_with_circuit_states if first time
+        if not hasattr(qctn, 'cores_weight_with_circuit_states'):
+            # Convert circuit_states to backend tensors
+            circuit_states_tensors = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
+            
+            # Initialize the dictionary to store contracted cores
+            qctn.cores_weight_with_circuit_states = {}
+            
+            # Get circuit structure
+            input_ranks, adjacency_matrix, output_ranks = qctn.circuit
+            
+            # Verify dimensions: cores should be one less than circuit_states
+            num_cores = len(qctn.cores)
+            num_states = len(circuit_states_tensors)
+            assert num_cores == num_states - 1, \
+                f"Number of cores ({num_cores}) should be one less than circuit_states ({num_states})"
+            
+            # Contract each core with its corresponding circuit_state(s)
+            for idx, core_name in enumerate(qctn.cores):
+                core_tensor = self.backend.convert_to_tensor(qctn.cores_weights[core_name])
+                
+                if idx == 0:
+                    state1 = circuit_states_tensors[0]
+                    state2 = circuit_states_tensors[1]
+                    
+                    # Contract with both states
+                    # core_tensor shape: (input_dim1, input_dim2, bond_dims..., output_dim)
+                    # state1 shape: (input_dim1,)
+                    # state2 shape: (input_dim2,)
+                    # result shape: (bond_dims..., output_dim)
+                    contracted = torch.einsum('i,j,ij...->...', state1, state2, core_tensor)
+                    qctn.cores_weight_with_circuit_states[core_name] = contracted
+                else:
+                    state = circuit_states_tensors[idx + 1]
+                    
+                    # Contract along the first dimension
+                    # core_tensor shape: (input_dim, bond_dims..., output_dim)
+                    # state shape: (input_dim,)
+                    # result shape: (bond_dims..., output_dim)
+                    contracted = torch.einsum('i,ji...->j...', state, core_tensor)
+                    qctn.cores_weight_with_circuit_states[core_name] = contracted
+        
+        print(f"cores_weight_with_circuit_states shape {[(k, v.shape) for k, v in qctn.cores_weight_with_circuit_states.items()]}")
+
+        # Step 2: Define computation function
+        def compute_with_measure(qctn_inner, measure_matrices):
+            """
+            Compute contraction with measure_input matrices.
+            
+            Args:
+                qctn_inner: QCTN object with cores_weight_with_circuit_states
+                measure_matrices: List of measurement matrices (one per output)
+            
+            Returns:
+                Result of contraction
+            """
+            
+            n = len(qctn_inner.cores_weight_with_circuit_states)
+
+            for idx in range(n):
+                if idx == 0:
+                    core_tensor = qctn_inner.cores_weight_with_circuit_states[qctn_inner.cores[0]]
+                    measure_matrix = measure_matrices[0]
+
+                    # A * M * A_T
+                    contracted = torch.einsum('ka,zkl,lb->zab', core_tensor, measure_matrix, core_tensor)
+                elif idx < n - 1:
+                    core_tensor = qctn_inner.cores_weight_with_circuit_states[qctn_inner.cores[idx]]
+                    measure_matrix = measure_matrices[idx]
+
+                    # contracted * B * M * B_T
+                    contracted = torch.einsum('zab,akc,zkl,bld->zcd', contracted, core_tensor, measure_matrix, core_tensor)
+                else:
+                    core_tensor = qctn_inner.cores_weight_with_circuit_states[qctn_inner.cores[idx]]
+                    measure_matrix_1 = measure_matrices[idx]
+                    measure_matrix_2 = measure_matrices[idx + 1]
+
+                    # contracted * Z * M * Z_T
+                    contracted = torch.einsum('zab,akc,zkl,zcd,bld->z', contracted, core_tensor, measure_matrix_1, measure_matrix_2, core_tensor)
+            return contracted
+        
+        # Step 3: Call the computation function and return result
+        # Convert measure_input_list to backend tensors
+        measure_matrices = [self.backend.convert_to_tensor(m) for m in measure_input_list]
+        
+        # Call computation function
+        result = compute_with_measure(qctn, measure_matrices)
+        
+        return result
+
+    def contract_with_std_graph(self, qctn, circuit_states_list, measure_input_list):
+        """
+        Contract QCTN using standard graph method with pre-contracted circuit states.
+        
+        This method first contracts circuit_states with cores to create 
+        cores_weight_with_circuit_states, then uses those for efficient computation.
+        
+        Args:
+            qctn (QCTN): The quantum circuit tensor network to contract.
+            circuit_states_list (list): List of circuit input states (one per qubit).
+                Each element is a tensor representing the state of one qubit.
+            measure_input_list (list): List of measurement input matrices.
+                Each element is a matrix (not vector) for measurement.
+        
+        Returns:
+            Backend tensor: Result of the contraction.
+        """
+        def compute_fn(qctn_inner, circuit_states, measure_matrices):
+            """
+            Compute contraction with measure_input matrices.
+            
+            Args:
+                qctn_inner: QCTN object with cores_weight_with_circuit_states
+                measure_matrices: List of measurement matrices (one per output)
+            
+            Returns:
+                Result of contraction
+            """
+
+            new_core_dict = {}
+
+            total_mem = 0
+
+            # Contract each core with its corresponding circuit_state(s)
+            for idx, core_name in enumerate(qctn.cores):
+                core_tensor = self.backend.convert_to_tensor(qctn.cores_weights[core_name])
+                
+                if idx == 0:
+                    state1 = circuit_states[0]
+                    state2 = circuit_states[1]
+                    
+                    # Contract with both states
+                    # core_tensor shape: (input_dim1, input_dim2, bond_dims..., output_dim)
+                    # state1 shape: (input_dim1,)
+                    # state2 shape: (input_dim2,)
+                    # result shape: (bond_dims..., output_dim)
+                    contracted = torch.einsum('i,j,ij...->...', state1, state2, core_tensor)
+
+                    new_core_dict[core_name] = contracted
+                else:
+                    state = circuit_states[idx + 1]
+                    
+                    # Contract along the first dimension
+                    # core_tensor shape: (input_dim, bond_dims..., output_dim)
+                    # state shape: (input_dim,)
+                    # result shape: (bond_dims..., output_dim)
+                    contracted = torch.einsum('i,ji...->j...', state, core_tensor)
+                    new_core_dict[core_name] = contracted
+                
+                # print(f'Contract core {core_name}, result shape: {contracted.shape}')
+                total_mem += contracted.numel() * contracted.element_size()
+
+            
+            n = len(new_core_dict)
+
+            for idx in range(n):
+                if idx == 0:
+                    core_tensor = new_core_dict[qctn_inner.cores[0]]
+                    measure_matrix = measure_matrices[0]
+
+                    # A * M * A_T
+                    contracted = torch.einsum('ka,zkl,lb->zab', core_tensor, measure_matrix, core_tensor)
+                elif idx < n - 1:
+                    core_tensor = new_core_dict[qctn_inner.cores[idx]]
+                    measure_matrix = measure_matrices[idx]
+
+                    # contracted * B * M * B_T
+                    contracted = torch.einsum('zab,akc,zkl,bld->zcd', contracted, core_tensor, measure_matrix, core_tensor)
+                else:
+                    core_tensor = new_core_dict[qctn_inner.cores[idx]]
+                    measure_matrix_1 = measure_matrices[idx]
+                    measure_matrix_2 = measure_matrices[idx + 1]
+
+                    # contracted * Z * M * Z_T
+                    contracted = torch.einsum('zab,akc,zkl,zcd,bld->z', contracted, core_tensor, measure_matrix_1, measure_matrix_2, core_tensor)
+
+                # print(f"Contract step {idx}, intermediate shape: {contracted.shape}")
+                total_mem += contracted.numel() * contracted.element_size()
+            
+            print(f"Total memory used in contraction: {total_mem / (1024 ** 2):.2f} MB")
+
+            return contracted
+        
+        # Ensure inputs are lists
+        assert isinstance(circuit_states_list, list), "circuit_states_list must be a list"
+        assert isinstance(measure_input_list, list), "measure_input_list must be a list"
+        
+        circuit_states_tensors = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
+        
+        measure_matrices = [self.backend.convert_to_tensor(m) for m in measure_input_list]
+        
+        result = compute_fn(qctn, circuit_states_tensors, measure_matrices)
+        
+        return result
+
+    def contract_with_std_graph_for_gradient(self, qctn, circuit_states_list, measure_input_list) -> Tuple:
+        """
+        Contract QCTN using standard graph method and compute gradients.
+        
+        This method computes the contraction and gradients with respect to core weights.
+        
+        Args:
+            qctn (QCTN): The quantum circuit tensor network to contract.
+            circuit_states_list (list): List of circuit input states (one per qubit).
+                Each element is a tensor representing the state of one qubit.
+            measure_input_list (list): List of measurement input matrices.
+                Each element is a matrix (not vector) for measurement.
+        
+        Returns:
+            tuple: (loss, gradients)
+        """
+        
+        # Ensure inputs are lists
+        assert isinstance(circuit_states_list, list), "circuit_states_list must be a list"
+        assert isinstance(measure_input_list, list), "measure_input_list must be a list"
+        
+        # Convert inputs to backend tensors
+        circuit_states_tensors = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
+        measure_matrices = [self.backend.convert_to_tensor(m) for m in measure_input_list]
+        
+        # Define the computation function
+        def compute_fn(qctn_inner, circuit_states, measure_matrices):
+            """
+            Compute contraction with measure_input matrices.
+            
+            Args:
+                qctn_inner: QCTN object
+                circuit_states: List of circuit state tensors
+                measure_matrices: List of measurement matrices
+            
+            Returns:
+                Result of contraction
+            """
+            new_core_dict = {}
+
+            # Contract each core with its corresponding circuit_state(s)
+            for idx, core_name in enumerate(qctn_inner.cores):
+                core_tensor = qctn_inner.cores_weights[core_name]
+                
+                if idx == 0:
+                    state1 = circuit_states[0]
+                    state2 = circuit_states[1]
+                    
+                    # Contract with both states
+                    contracted = torch.einsum('i,j,ij...->...', state1, state2, core_tensor)
+                    new_core_dict[core_name] = contracted
+                else:
+                    state = circuit_states[idx + 1]
+                    
+                    # Contract along the first dimension
+                    contracted = torch.einsum('i,ji...->j...', state, core_tensor)
+                    new_core_dict[core_name] = contracted
+
+            n = len(new_core_dict)
+
+            for idx in range(n):
+                # print(f'Contract shape {qctn_inner.cores[idx]} {qctn_inner.cores_weights[qctn_inner.cores[idx]].shape} {new_core_dict[qctn_inner.cores[idx]].shape} {measure_matrices[idx].shape} at step {idx}')
+                if idx == 0:
+                    core_tensor = new_core_dict[qctn_inner.cores[idx]]
+                    measure_matrix = measure_matrices[idx]
+
+                    # A * M * A_T
+                    contracted = torch.einsum('ka,zkl,lb->zab', core_tensor, measure_matrix, core_tensor)
+                elif idx < n - 1:
+                    core_tensor = new_core_dict[qctn_inner.cores[idx]]
+                    measure_matrix = measure_matrices[idx]
+
+                    # contracted * B * M * B_T
+                    contracted = torch.einsum('zab,akc,zkl,bld->zcd', contracted, core_tensor, measure_matrix, core_tensor)
+                else:
+                    core_tensor = new_core_dict[qctn_inner.cores[idx]]
+                    measure_matrix_1 = measure_matrices[idx]
+                    measure_matrix_2 = measure_matrices[idx + 1]
+
+                    # contracted * Z * M * Z_T
+                    contracted = torch.einsum('zab,akc,zkl,zcd,bld->z', contracted, core_tensor, measure_matrix_1, measure_matrix_2, core_tensor)
+            return contracted
+        
+        # Define loss function
+        def loss_fn(*core_tensors):
+            """
+            Loss function that takes core tensors as input.
+            
+            Args:
+                *core_tensors: Core weight tensors to optimize
+            
+            Returns:
+                Loss value
+            """
+            # Create a temporary qctn-like object with updated cores
+            class TempQCTN:
+                def __init__(self, cores_list, core_tensors):
+                    self.cores = cores_list
+                    self.cores_weights = {
+                        core_name: core_tensors[idx] 
+                        for idx, core_name in enumerate(cores_list)
+                    }
+            
+            temp_qctn = TempQCTN(qctn.cores, core_tensors)
+            result = compute_fn(temp_qctn, circuit_states_tensors, measure_matrices)
+            
+            # Compute Cross entropy loss
+            target = torch.ones_like(result)
+            log_result = torch.log(result + 1e-10)
+            return -torch.mean(target * log_result)
+        
+        # Prepare core tensors for gradient computation
+        core_tensors = [self.backend.convert_to_tensor(qctn.cores_weights[c]) for c in qctn.cores]
+        
+        # Compute gradients for all cores
+        num_cores = len(qctn.cores)
+        argnums = list(range(num_cores))
+        
+        # Create value_and_grad function
+        cache_key = '_grad_fn_std_graph'
+        if not hasattr(qctn, cache_key):
+            value_and_grad_fn = self.backend.compute_value_and_grad(loss_fn, argnums=argnums)
+            # Note: JIT compilation might not work well with the TempQCTN class
+            # value_and_grad_fn = self.backend.jit_compile(value_and_grad_fn)
+            setattr(qctn, cache_key, value_and_grad_fn)
+        else:
+            value_and_grad_fn = getattr(qctn, cache_key)
+        
+        # Compute value and gradients
+        loss, grads = value_and_grad_fn(*core_tensors)
         
         return loss, grads

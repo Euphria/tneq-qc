@@ -327,6 +327,16 @@ class TensorContractor:
                 output_symbols_stack.append(symbol)
                 symbol_id += 1
 
+            # TODO: use better strategy
+            ll = core_equation[:2]
+            rr = core_equation[2:]
+            # sort string characters
+            ll = list(ll)
+            ll.sort()
+            rr = list(rr)
+            rr.sort()
+            core_equation = "".join(ll + rr[::-1])
+
             einsum_equation_lefthand += core_equation
             equation_list.append(core_equation)
 
@@ -348,6 +358,9 @@ class TensorContractor:
                 middle_symbols_mapping[char] = symbol
 
                 middle_block_list += [batch_symbol + char + symbol]
+            # swap last two 
+            if len(middle_block_list) >=2:
+                middle_block_list = middle_block_list[:-2] + middle_block_list[-2:][::-1]
 
         # print('output_symbols_stack', output_symbols_stack)
         # print('middle_block_list', middle_block_list)
@@ -366,6 +379,7 @@ class TensorContractor:
                         symbol = opt_einsum.get_symbol(symbol_id)
                         symbol_id += 1
                         new_symbol_mapping[char] = symbol
+                        # print(f"mapping {char} to {symbol}")
 
                         if char in input_symbols_stack:
                             real_output_symbols_stack.append(symbol)
@@ -381,10 +395,16 @@ class TensorContractor:
         # Handle circuit_states and measure_input
         if is_states_list:
             circuit_states_symbols = ','.join(input_symbols_stack)
-            output_states_symbols = ','.join(real_output_symbols_stack)
+            output_states_symbols = ''
+            for char in circuit_states_symbols[::-1]:
+                output_states_symbols += char if char==',' else new_symbol_mapping[char]
+            # output_states_symbols = ','.join(real_output_symbols_stack)
         else:
             circuit_states_symbols = ''.join(input_symbols_stack)
-            output_states_symbols = ''.join(real_output_symbols_stack)
+            output_states_symbols = ''
+            for char in circuit_states_symbols[::-1]:
+                output_states_symbols += new_symbol_mapping[char]
+            # output_states_symbols = ''.join(real_output_symbols_stack)
 
         # Build equation parts
         left_parts = []
