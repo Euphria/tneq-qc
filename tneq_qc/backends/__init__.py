@@ -1,19 +1,14 @@
 from .copteinsum import ContractorOptEinsum
-from .pytorch_backend import ContractorPyTorch
-from .backend_factory import (
-    BackendFactory,
-    BackendInfo,
-    ComputeBackend,
-    JAXBackend,
-    PyTorchBackend
-)
+from .backend_factory import BackendFactory
+from .backend_interface import BackendInfo, ComputeBackend
+from .backend_jax import BackendJAX
+from .backend_pytorch import BackendPyTorch
 
 __all__ = [
     'ContractorOptEinsum',
-    'ContractorPyTorch',
     'BackendFactory',
     'BackendInfo',
     'ComputeBackend',
-    'JAXBackend',
-    'PyTorchBackend'
+    'BackendJAX',
+    'BackendPyTorch'
 ]
