@@ -1,5 +1,5 @@
 from ..config import Configuration
-from .tenmul_qc import QCTN, QCTNHelper
+from .qctn import QCTN, QCTNHelper
 import jax
 import jax.numpy as jnp
 import itertools

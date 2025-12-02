@@ -324,3 +324,31 @@ class BackendPyTorch(ComputeBackend):
         Y_alpha = left_inv @ right_matrix @ X
         
         return Y_alpha
+
+    def init_random_core(self, shape):
+        """Initialize random core using QR decomposition for orthogonality."""
+        flat_dim = int(np.prod(shape[:len(shape)//2]))
+        
+        random_matrix = self.torch.randn((flat_dim, flat_dim), device=self.backend_info.device)
+        Q, R = self.torch.linalg.qr(random_matrix)
+        d = self.torch.diag(R)
+        sign_correction = self.torch.sign(d)
+        Q = Q * sign_correction.unsqueeze(0)
+        return Q.reshape(shape)
+
+    def get_tensor_type(self):
+        return self.torch.Tensor
+
+    def set_random_seed(self, seed: int):
+        """Set random seed for PyTorch and related libraries."""
+        self.torch.manual_seed(seed)
+        if self.torch.cuda.is_available():
+            self.torch.cuda.manual_seed(seed)
+            self.torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+
+    def tensor_to_numpy(self, tensor):
+        if not isinstance(tensor, self.torch.Tensor):
+            tensor = self.torch.as_tensor(tensor)
+        return tensor.detach().cpu().numpy()

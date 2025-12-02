@@ -1,5 +1,5 @@
 from tneq_qc.config import Configuration
-from tneq_qc.core.tenmul_qc import QCTN, QCTNHelper
+from tneq_qc.core.qctn import QCTN, QCTNHelper
 from tneq_qc.core.cqctn import ContractorQCTN
 from tneq_qc.backends.copteinsum import ContractorOptEinsum
 from tneq_qc.optim.optimizer import Optimizer

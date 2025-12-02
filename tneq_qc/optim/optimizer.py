@@ -1,4 +1,5 @@
 import random
+from typing import Callable, Optional
 
 class Optimizer:
     """
@@ -8,17 +9,18 @@ class Optimizer:
     """
 
     def __init__(self, method='adam', 
-                       learning_rate=0.01, 
-                       max_iter=1000, 
-                       tol=1e-6, # Tolerance for convergence
-                       beta1=0.9, # Adam's first moment estimate decay rate
-                       beta2=0.999, # Adam's second moment estimate decay rate
-                       epsilon=1e-8, # Small constant to prevent division by zero
-                       executor=None,
-                       # SGDG parameters
-                       momentum=0.0, # Momentum factor for SGDG
-                       stiefel=True, # Whether to use Stiefel manifold optimization
-                  ):
+                   learning_rate=0.01, 
+                   max_iter=1000, 
+                   tol=1e-6, # Tolerance for convergence
+                   beta1=0.9, # Adam's first moment estimate decay rate
+                   beta2=0.999, # Adam's second moment estimate decay rate
+                   epsilon=1e-8, # Small constant to prevent division by zero
+                   executor=None,
+                   lr_schedule: Optional[list] = None,
+                   # SGDG parameters
+                   momentum=0.0, # Momentum factor for SGDG
+                   stiefel=True, # Whether to use Stiefel manifold optimization
+               ):
 
         self.method = method
         self.max_iter = max_iter
@@ -30,9 +32,32 @@ class Optimizer:
         self.iter = 0
         self.momentum = momentum
         self.stiefel = stiefel
+        self.lr_schedule = lr_schedule
 
         self.executor = executor
         self.opt_state = {}
+
+    def _apply_lr_schedule(self):
+        """Update the current learning rate via lr_schedule if provided.
+        
+        If lr_schedule is None, the learning_rate remains constant.
+        If lr_schedule is provided, it should be a list of (step, lr) tuples,
+        sorted by step in ascending order. The learning rate will be set to
+        the lr value corresponding to the largest step <= current iteration.
+        
+        Example:
+            lr_schedule = [(0, 1e-2), (200, 1e-3), (800, 1e-4)]
+            - step 0-199: lr = 1e-2
+            - step 200-799: lr = 1e-3
+            - step >= 800: lr = 1e-4
+        """
+        if self.lr_schedule is None:
+            return
+
+        for step, lr in reversed(self.lr_schedule):
+            if self.iter >= step:
+                self.learning_rate = lr
+                return
 
     def optimize(self, qctn, data_list, **kwargs):
         """
@@ -53,31 +78,15 @@ class Optimizer:
 
             # Convert loss to scalar for comparison and printing
             loss_value = float(loss) if hasattr(loss, 'item') else loss
+            self._apply_lr_schedule()
             
             if self.tol and loss_value < self.tol:
                 print(f"Convergence achieved at iteration {self.iter} with loss {loss_value}.")
                 break
             
-            print(f"Iteration {self.iter}: loss = {loss_value}")
+            print(f"Iteration {self.iter}: loss = {loss_value} lr = {self.learning_rate}")
 
-            # Update parameters using the optimizer step
-            cache_lr = self.learning_rate
-
-            # Adaptive LR logic - commented out for backend agnosticism for now
-            # Or we can implement a backend method to check max grad
-            # if self.iter < 1000:
-            #     max_grad = 0.0
-            #     for i in range(len(grads)):
-            #         grad = grads[i].abs().max()
-            #         if grad > max_grad:
-            #             max_grad = grad
-            # 
-            #     if max_grad < 1e-2:
-            #         self.learning_rate = self.learning_rate * 1e-1 / (max_grad + 1e-30)
-                    
             self.step(qctn, grads)
-
-            self.learning_rate = cache_lr
 
             self.iter += 1
         else:
@@ -102,7 +111,7 @@ class Optimizer:
             
             # Convert loss to scalar for comparison and printing
             loss_value = float(loss) if hasattr(loss, 'item') else loss
-            
+            self._apply_lr_schedule()
             if self.tol and loss_value < self.tol:
                 print(f"Convergence achieved at iteration {self.iter} with loss {loss_value}.")
                 break
@@ -110,8 +119,6 @@ class Optimizer:
             print(f"Iteration {self.iter}: loss = {loss_value}")
 
             # Update parameters using the optimizer step
-            cache_lr = self.learning_rate
-            
             # Adaptive LR logic - commented out for backend agnosticism
             # if self.iter < 1000:
             #     max_grad = 0.0
@@ -126,7 +133,6 @@ class Optimizer:
                 
             self.step(qctn, grads)
 
-            self.learning_rate = cache_lr
             self.iter += 1
 
         else:
@@ -134,7 +140,7 @@ class Optimizer:
 
     def optimize_with_target(self, qctn, target_qctn):
         """
-        Optimize a function using JAX.
+        Optimize a function.
         
         Args:
             qctn (QCTN): The quantum circuit tensor network to optimize.
@@ -146,19 +152,21 @@ class Optimizer:
 
         while self.iter < self.max_iter:
             loss, grads = qctn.contract_with_QCTN_for_gradient(target_qctn)
-            if loss < self.tol:
-                print(f"Convergence achieved at iteration {self.iter} with loss {loss}.")
+            loss_value = float(loss) if hasattr(loss, 'item') else loss
+            self._apply_lr_schedule()
+            if loss_value < self.tol:
+                print(f"Convergence achieved at iteration {self.iter} with loss {loss_value}.")
                 break
 
             # Update parameters using the optimizer step
             self.step(qctn, grads)
             self.iter += 1
         else:
-            print(f"Maximum iterations reached: {self.max_iter} with final loss {loss}.")
+            print(f"Maximum iterations reached: {self.max_iter} with final loss {loss_value}.")
 
     def optimize_self_with_inputs(self, qctn, inputs_list):
         """
-        Optimize a function using JAX with self-contraction and given inputs.
+        Optimize a function using self-contraction and given inputs.
         
         Args:
             qctn (QCTN): The quantum circuit tensor network to optimize.
@@ -177,15 +185,17 @@ class Optimizer:
             inputs = inputs_list[train_index_list[self.iter % len(inputs_list)]]
 
             loss, grads = qctn.contract_with_self_for_gradient(inputs)
-            if loss < self.tol:
-                print(f"Convergence achieved at iteration {self.iter} with loss {loss}.")
+            loss_value = float(loss) if hasattr(loss, 'item') else loss
+            self._apply_lr_schedule()
+            if loss_value < self.tol:
+                print(f"Convergence achieved at iteration {self.iter} with loss {loss_value}.")
                 break
 
             # Update parameters using the optimizer step
             self.step(qctn, grads)
             self.iter += 1
         else:
-            print(f"Maximum iterations reached: {self.max_iter} with final loss {loss}.")
+            print(f"Maximum iterations reached: {self.max_iter} with final loss {loss_value}.")
 
 
     def step(self, qctn, grads):

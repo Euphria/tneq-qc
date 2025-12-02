@@ -1,7 +1,7 @@
 """
 Unified executor that combines contractor (expression generation) with backend (execution).
 
-This module provides high-level functions that use TensorContractor to generate
+This module provides high-level functions that use EinsumStrategy to generate
 expressions and then execute them using the specified backend.
 
 Now supports strategy-based compilation for optimized contraction paths.
@@ -12,7 +12,7 @@ from typing import Optional, Union, List, Tuple, Dict, Any
 import numpy as np
 import torch
 
-from .contractor import TensorContractor, StrategyCompiler
+from .contractor import EinsumStrategy, StrategyCompiler
 from ..backends.backend_factory import BackendFactory, ComputeBackend
 
 
@@ -21,7 +21,7 @@ class ContractExecutor:
     Executor that combines tensor contraction expression generation with backend execution.
     
     This class separates concerns:
-    - TensorContractor: Generates einsum expressions using opt_einsum (legacy)
+    - EinsumStrategy: Generates einsum expressions using opt_einsum (legacy)
     - StrategyCompiler: Compiles optimal strategies based on network structure
     - ComputeBackend: Executes expressions using JAX, PyTorch, etc.
     """
@@ -46,7 +46,7 @@ class ContractExecutor:
         else:
             self.backend = backend
 
-        self.contractor = TensorContractor()  # Keep for legacy methods
+        self.contractor = EinsumStrategy()  # Keep for legacy methods
         self.strategy_compiler = StrategyCompiler(mode=strategy_mode)
         self.strategy_mode = strategy_mode
 
@@ -720,33 +720,69 @@ class ContractExecutor:
                 # print(f'Contract core {core_name}, result shape: {contracted.shape}')
                 total_mem += contracted.numel() * contracted.element_size()
 
+            print('new_core_dict', [(core_name, new_core_dict[core_name].shape) for core_name in new_core_dict])
             
             n = len(new_core_dict)
 
-            for idx in range(n):
-                if idx == 0:
-                    core_tensor = new_core_dict[qctn_inner.cores[0]]
-                    measure_matrix = measure_matrices[0]
+            # for idx in range(n):
+            #     if idx == 0:
+            #         core_tensor = new_core_dict[qctn_inner.cores[0]]
+            #         measure_matrix = measure_matrices[0]
 
-                    # A * M * A_T
-                    contracted = torch.einsum('ka,zkl,lb->zab', core_tensor, measure_matrix, core_tensor)
-                elif idx < n - 1:
-                    core_tensor = new_core_dict[qctn_inner.cores[idx]]
-                    measure_matrix = measure_matrices[idx]
+            #         # A * M * A_T
+            #         contracted = torch.einsum('ka,zkl,lb->zab', core_tensor, measure_matrix, core_tensor)
+            #     elif idx < n - 1:
+            #         core_tensor = new_core_dict[qctn_inner.cores[idx]]
+            #         measure_matrix = measure_matrices[idx]
 
-                    # contracted * B * M * B_T
-                    contracted = torch.einsum('zab,akc,zkl,bld->zcd', contracted, core_tensor, measure_matrix, core_tensor)
-                else:
-                    core_tensor = new_core_dict[qctn_inner.cores[idx]]
-                    measure_matrix_1 = measure_matrices[idx]
-                    measure_matrix_2 = measure_matrices[idx + 1]
+            #         # contracted * B * M * B_T
+            #         contracted = torch.einsum('zab,akc,zkl,bld->zcd', contracted, core_tensor, measure_matrix, core_tensor)
+            #     else:
+            #         core_tensor = new_core_dict[qctn_inner.cores[idx]]
+            #         measure_matrix_1 = measure_matrices[idx]
+            #         measure_matrix_2 = measure_matrices[idx + 1]
 
-                    # contracted * Z * M * Z_T
-                    contracted = torch.einsum('zab,akc,zkl,zcd,bld->z', contracted, core_tensor, measure_matrix_1, measure_matrix_2, core_tensor)
+            #         # contracted * Z * M * Z_T
+            #         contracted = torch.einsum('zab,akc,zkl,zcd,bld->z', contracted, core_tensor, measure_matrix_1, measure_matrix_2, core_tensor)
 
-                # print(f"Contract step {idx}, intermediate shape: {contracted.shape}")
-                total_mem += contracted.numel() * contracted.element_size()
+            #     print(f"Contract step {idx}, intermediate shape: {contracted.shape}")
+
+            #     total_mem += contracted.numel() * contracted.element_size()
             
+            if n == 1:
+                core_tensor = new_core_dict[qctn_inner.cores[0]]
+                measure_matrix_1 = measure_matrices[0]
+                measure_matrix_2 = measure_matrices[1]
+
+                # A * M * M * A_T
+                contracted = torch.einsum('ka,zkl,zab,lb->z', core_tensor, measure_matrix_1, measure_matrix_2, core_tensor)
+
+            # for idx in range(n):
+            #     if idx == 0:
+            #         core_tensor = new_core_dict[qctn_inner.cores[0]]
+            #         measure_matrix_1 = measure_matrices[idx]
+            #         measure_matrix_2 = measure_matrices[idx+1]
+
+            #         # A * M * M * A_T
+            #         contracted = torch.einsum('ka,zkl,z,lb->zab', core_tensor, measure_matrix, core_tensor)
+            #     elif idx < n - 1:
+            #         core_tensor = new_core_dict[qctn_inner.cores[idx]]
+            #         measure_matrix = measure_matrices[idx]
+
+            #         # contracted * B * M * B_T
+            #         contracted = torch.einsum('zab,akc,zkl,bld->zcd', contracted, core_tensor, measure_matrix, core_tensor)
+            #     else:
+            #         core_tensor = new_core_dict[qctn_inner.cores[idx]]
+            #         measure_matrix_1 = measure_matrices[idx]
+            #         measure_matrix_2 = measure_matrices[idx + 1]
+
+            #         # contracted * Z * M * Z_T
+            #         contracted = torch.einsum('zab,akc,zkl,zcd,bld->z', contracted, core_tensor, measure_matrix_1, measure_matrix_2, core_tensor)
+
+            #     print(f"Contract step {idx}, intermediate shape: {contracted.shape}")
+                
+            #     total_mem += contracted.numel() * contracted.element_size()
+
             print(f"Total memory used in contraction: {total_mem / (1024 ** 2):.2f} MB")
 
             return contracted
@@ -823,6 +859,16 @@ class ContractExecutor:
 
             n = len(new_core_dict)
 
+            if n == 1:
+                core_tensor = new_core_dict[qctn_inner.cores[0]]
+                measure_matrix_1 = measure_matrices[0]
+                measure_matrix_2 = measure_matrices[1]
+
+                # A * M * M * A_T
+                contracted = torch.einsum('ka,zkl,zab,lb->z', core_tensor, measure_matrix_1, measure_matrix_2, core_tensor)
+                
+                return contracted
+            
             for idx in range(n):
                 # print(f'Contract shape {qctn_inner.cores[idx]} {qctn_inner.cores_weights[qctn_inner.cores[idx]].shape} {new_core_dict[qctn_inner.cores[idx]].shape} {measure_matrices[idx].shape} at step {idx}')
                 if idx == 0:
@@ -871,7 +917,10 @@ class ContractExecutor:
             
             # Compute Cross entropy loss
             target = torch.ones_like(result)
-            log_result = torch.log(result + 1e-10)
+
+            # TODO: avoid result <= 0
+            result = torch.clamp(result, min=1e-10)
+            log_result = torch.log(result)
             return -torch.mean(target * log_result)
         
         # Prepare core tensors for gradient computation

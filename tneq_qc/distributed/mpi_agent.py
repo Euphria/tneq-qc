@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import mpi4py
 from .mpi_core import TAGS, REASONS, SURVIVAL, load_func
-from ..core.tenmul_qc import QCTN
+from ..core.qctn import QCTN
 from ..core.cqctn import ContractorQCTN
 from ..backends.copteinsum import ContractorOptEinsum
 from ..config import Configuration

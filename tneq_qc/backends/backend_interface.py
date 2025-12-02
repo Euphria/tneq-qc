@@ -152,3 +152,49 @@ class ComputeBackend(ABC):
                 f"backend '{self.get_backend_name()}'"
             )
         self.backend_info = backend_info
+
+    @abstractmethod
+    def init_random_core(self, shape):
+        """
+        Initialize a random core tensor (orthogonal initialization).
+        
+        Args:
+            shape: Shape of the tensor.
+            
+        Returns:
+            Initialized tensor.
+        """
+        pass
+
+    @abstractmethod
+    def get_tensor_type(self):
+        """
+        Get the type of tensors used by this backend.
+        
+        Returns:
+            Type/Class of the tensor.
+        """
+        pass
+
+    @abstractmethod
+    def tensor_to_numpy(self, tensor) -> np.ndarray:
+        """
+        Convert a backend tensor to a NumPy array.
+
+        Args:
+            tensor: Backend-specific tensor.
+
+        Returns:
+            NumPy ndarray with the same data.
+        """
+        pass
+
+    @abstractmethod
+    def set_random_seed(self, seed: int):
+        """
+        Set random seed for reproducibility.
+        
+        Args:
+            seed: Integer seed value.
+        """
+        pass

@@ -1,7 +1,7 @@
-from .contractor import TensorContractor
+from .contractor import EinsumStrategy
 from .executor import ContractExecutor
-from .tenmul_qc import QCTN, QCTNHelper
+from .qctn import QCTN, QCTNHelper
 from .tn_graph import TNGraph
 
-__all__ = ['TensorContractor', 'ContractExecutor', 'QCTN', 'QCTNHelper', 'TNGraph']
+__all__ = ['EinsumStrategy', 'ContractExecutor', 'QCTN', 'QCTNHelper', 'TNGraph']
 

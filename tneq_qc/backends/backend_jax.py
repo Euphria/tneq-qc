@@ -4,6 +4,7 @@ Backend JAX implementation.
 
 from __future__ import annotations
 from typing import Optional, List, Dict, Any, Tuple
+import numpy as np
 
 from .backend_interface import ComputeBackend, BackendInfo
 
@@ -32,6 +33,9 @@ class BackendJAX(ComputeBackend):
             
             # Create BackendInfo
             self.backend_info = BackendInfo('jax', device=device)
+            
+            # Initialize PRNG key
+            self.key = self.jax.random.PRNGKey(0)
         except ImportError:
             raise ImportError("JAX is not installed. Please install it with: pip install jax jaxlib")
 
@@ -128,3 +132,26 @@ class BackendJAX(ComputeBackend):
         for param, grad in zip(params, grads):
             new_params.append(param - lr * grad)
         return new_params, state
+
+    def init_random_core(self, shape):
+        flat_dim = int(np.prod(shape[:len(shape)//2]))
+        
+        # Split key
+        self.key, subkey = self.jax.random.split(self.key)
+        
+        random_matrix = self.jax.random.normal(subkey, (flat_dim, flat_dim))
+        Q, R = self.jnp.linalg.qr(random_matrix)
+        d = self.jnp.diag(R)
+        sign_correction = self.jnp.sign(d)
+        Q = Q * sign_correction[None, :] # unsqueeze(0) equivalent
+        return Q.reshape(shape)
+
+    def get_tensor_type(self):
+        return self.jnp.ndarray
+
+    def set_random_seed(self, seed: int):
+        self.key = self.jax.random.PRNGKey(seed)
+        np.random.seed(seed)
+
+    def tensor_to_numpy(self, tensor):
+        return np.asarray(tensor)

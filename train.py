@@ -1,6 +1,6 @@
 import time
 from tneq_qc.config import Configuration
-from tneq_qc.core.tenmul_qc import QCTN, QCTNHelper
+from tneq_qc.core.qctn import QCTN, QCTNHelper
 from tneq_qc.core.cqctn import ContractorQCTN
 from tneq_qc.backends.copteinsum import ContractorOptEinsum
 from tneq_qc.core.executor import ContractExecutor
@@ -64,7 +64,9 @@ def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
 
     for i in range(num_batch):
         
-        x = torch.empty((batch_size, num_qubits), device='cuda').uniform_(-5, 5)
+        # x变成-5到5的高斯分布
+        # x = torch.empty((batch_size, num_qubits), device='cuda').trunc_normal_(mean=0.0, std=1.0, a=-5.0, b=5.0)
+        x = torch.empty((batch_size, num_qubits), device='cuda').normal_(mean=0.0, std=1.0)
         
         # print('x', x, x.shape)
         
@@ -80,8 +82,8 @@ def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
         out = weights * torch.sqrt(torch.exp(- torch.square(x) / 2))[:, :, None] * out
 
         print(f'phi_x.shape {out.shape}')
-        out_norm = torch.sum(out * out, dim=-1)
-        out = out / torch.sqrt(out_norm)[:, :, None]
+        # out_norm = torch.sum(out * out, dim=-1)
+        # out = out / torch.sqrt(out_norm)[:, :, None]
 
         # print(f"out after weighting and scaling: {out}, out.shape: {out.shape}")
         einsum_expr = "abc,abd->abcd"
@@ -117,14 +119,14 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
-    executor = ContractExecutor(backend=backend_type)
+    executor = ContractExecutor(backend=backend_type, strategy_mode="balanced")
 
     qctn_graph = QCTNHelper.generate_example_graph()
     print(f"qctn_graph: \n{qctn_graph}")
-    qctn = QCTN(qctn_graph, backend_info=executor.backend.backend_info)
+    qctn = QCTN(qctn_graph, backend=executor.backend)
 
-    N = 1
-    B = 4
+    N = 20
+    B = 512
     D = qctn.nqubits
     K = 3
 
@@ -229,6 +231,18 @@ if __name__ == "__main__":
 
     # exit()
 
+    # Define step-based learning rate schedule
+    # Format: list of (step, lr) tuples
+    # At step 0: lr = 1e-2
+    # At step 200: lr drops to 1e-3 (10x decay)
+    # At step 800: lr drops to 1e-4 (another 10x decay)
+    lr_schedule = [
+        (0, 1e-2),
+        (200, 5e-3),
+        (600, 2e-3),
+        (800, 1e-3),
+    ]
+
     optimizer = Optimizer(
         method='sgdg', 
         max_iter=1000, 
@@ -239,6 +253,7 @@ if __name__ == "__main__":
         beta2=0.95, 
         epsilon=1e-8,
         executor=executor,
+        lr_schedule=lr_schedule,
 
         momentum=0.9,            # 动量因子
         stiefel=True,            # 启用 Stiefel 流形优化
@@ -264,14 +279,32 @@ if __name__ == "__main__":
     test_loss_list = []
     for i in range(N):
         data_slice = [x[0:1] for x in data_list[i]["measure_input_list"]]
-        result = executor.contract_with_self(qctn, 
-                                             circuit_states=circuit_states_list,
-                                             measure_input=data_slice, 
-                                             measure_is_matrix=True,
-                                            )
+        result = executor.contract_with_std_graph(qctn, 
+                                                circuit_states_list=circuit_states_list,
+                                                measure_input_list=data_slice, 
+                                                )
         print(f"Test {i}, Result: {result.item()}")
         test_loss_list.append(result.item())
 
     print(f"Average Result: {sum(test_loss_list) / len(test_loss_list)}")
     print(f"Max Result: {max(test_loss_list)}")
     print(f"Min Result: {min(test_loss_list)}")
+
+    # save cores
+
+    cores_file = "./assets/qctn_cores.safetensors"
+    qctn.save_cores(cores_file, metadata={"graph": "example"})
+
+    # load pretrained qctn
+    pretrained_qctn = QCTN.from_pretrained(qctn_graph, cores_file, backend=executor.backend)
+    with torch.no_grad():
+        pretrained_result = executor.contract_with_std_graph(
+            pretrained_qctn,
+            circuit_states_list=circuit_states_list,
+            measure_input_list=data_list[0]["measure_input_list"],
+        )
+    print(f"Pretrained Result (std graph): {pretrained_result} {pretrained_result.shape}")
+
+    # get cross entropy loss for all pretrained results (shape = 512)
+    loss = - torch.log(pretrained_result)
+    print(f"Cross Entropy Loss: {loss} {torch.mean(loss)}")

@@ -1,10 +1,8 @@
-import jax
-import torch
 import numpy as np
-import jax.numpy as jnp
 import itertools
 import re, random
-from typing import Union
+from pathlib import Path
+from typing import Union, Any, Optional, Mapping
 from ..config import Configuration
 from ..backends.copteinsum import ContractorOptEinsum
 
@@ -68,7 +66,7 @@ class QCTNHelper:
                     graph += line + "\n"
                 return graph
 
-            return generate_std_graph(4)
+            return generate_std_graph(3)
         
             # return  "-3-A-3-"
             # return  "-3-A-3-B-3-C-3-D-3-"
@@ -218,7 +216,7 @@ class QCTNHelper:
         return graph.strip()
     
     @staticmethod
-    def jax_triu_ndindex(n):
+    def triu_ndindex(n):
         """Generate indices for the upper triangular part of a square matrix."""
         for i in range(n):
             for j in range(i + 1, n):
@@ -250,12 +248,13 @@ class QCTN:
  
     """
 
-    def __init__(self, graph, backend_info=None):
+    def __init__(self, graph, backend=None):
         """
         Initialize the QCTN with a quantum circuit graph.
         
         Args:
             graph (str): A string representation of the quantum circuit graph.
+            backend (ComputeBackend): The backend to use for computation.
         """
         self.graph = graph
         self.qubits = graph.strip().splitlines()
@@ -276,10 +275,11 @@ class QCTN:
         # This will build the attributes `self.circuit` and `self.adjacency_matrix`
         self._circuit_to_adjacency()
 
-        self.backend_info = backend_info
+        self.backend = backend
+        self._loaded_metadata: Optional[Mapping[str, str]] = None
 
         # Initialize the circuit with input ranks, adjacency matrix, and output ranks
-        self.initialize_random_key = jax.random.PRNGKey(0)
+        # self.initialize_random_key = jax.random.PRNGKey(0)
 
         # Initialize the cores with random values
         self.cores_weights = {}
@@ -413,39 +413,78 @@ class QCTN:
 
             core_shape = input_rank + list(itertools.chain.from_iterable(adjacency_ranks)) + output_rank
 
-            # 取core_shape的前一半，乘起来作为flat_dim
-            flat_dim = np.prod(core_shape[:len(core_shape)//2])
-
-            random_matrix = torch.randn((flat_dim, flat_dim), device=self.backend_info.device)
-
-            Q, R = torch.linalg.qr(random_matrix)
-
-            d = torch.diag(R)
-            sign_correction = torch.sign(d)
-            Q = Q * sign_correction.unsqueeze(0)
-
-            core = Q.reshape(core_shape)
+            core = self.backend.init_random_core(core_shape)
 
             self.cores_weights[core_name] = core
 
-            # print(f"Initialized core {core_name} with shape {core_shape} core: \n{core}")
+    def save_cores(self, file_path: Union[str, Path], metadata: Optional[Mapping[str, str]] = None):
+        """Save all core tensors into a safetensors file."""
 
-            # # 检查core是不是正交矩阵
-            # core_reshaped = core.reshape((flat_dim, flat_dim))
-            # identity = torch.matmul(core_reshaped.T, core_reshaped)
-            # # identity > 0.999 = 1.0， < 1e-6 = 0.0
-            # identity = torch.where(torch.abs(identity) > 0.999, torch.ones_like(identity), identity)
-            # identity = torch.where(torch.abs(identity) < 1e-6, torch.zeros_like(identity), identity)
-            # print(f"Core {core_name} orthogonality check (should be identity): \n{identity}")
+        if self.backend is None:
+            raise RuntimeError("Backend must be initialized before saving cores.")
 
-            # if self.backend_info is not None and self.backend_info.backend_type == 'pytorch':
-            #     import torch
-            #     core = torch.randn(core_shape, device=self.backend_info.device) * Configuration.initialize_variance
-            # else:
-            #     core = jax.random.normal(self.initialize_random_key, shape=core_shape) * Configuration.initialize_variance      
+        try:
+            from safetensors.numpy import save_file
+        except ImportError as exc:
+            raise ImportError("safetensors is required to save cores; install it with `pip install safetensors`.") from exc
 
-            # self.cores_weights[core_name] = core
-        # exit()
+        tensor_dict = {}
+        for core_name, tensor in self.cores_weights.items():
+            tensor_dict[f"core_{core_name}"] = self.backend.tensor_to_numpy(tensor)
+
+        metadata_dict = {} if metadata is None else {str(k): str(v) for k, v in metadata.items()}
+        save_file(tensor_dict, str(file_path), metadata=metadata_dict)
+
+    def load_cores(self, file_path: Union[str, Path], strict: bool = True) -> Mapping[str, str]:
+        """Load saved core tensors from a safetensors file."""
+
+        if self.backend is None:
+            raise RuntimeError("Backend must be initialized before loading cores.")
+
+        try:
+            from safetensors.numpy import load_file
+        except ImportError as exc:
+            raise ImportError("safetensors is required to load cores; install it with `pip install safetensors`.") from exc
+
+        result = load_file(str(file_path))
+        if isinstance(result, tuple) and len(result) == 2:
+            tensor_dict, metadata = result
+        else:
+            tensor_dict = result
+            metadata = {}
+
+        for core_name in self.cores:
+            key = f"core_{core_name}"
+            if key not in tensor_dict:
+                if strict:
+                    raise KeyError(f"Missing tensor for core {core_name} in {file_path}")
+                continue
+            array = tensor_dict[key]
+            self.cores_weights[core_name] = self.backend.convert_to_tensor(array)
+
+        metadata_dict = {str(k): str(v) for k, v in metadata.items()}
+        self._loaded_metadata = metadata_dict
+        return metadata_dict
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        graph: str,
+        file_path: Union[str, Path],
+        backend=None,
+        strict: bool = True,
+    ) -> "QCTN":
+        """Create a QCTN instance loading core tensors from safetensors."""
+
+        if backend is None:
+            from ..backends.backend_factory import BackendFactory
+
+            backend = BackendFactory.get_default_backend()
+
+        instance = cls(graph, backend=backend)
+        instance.load_cores(file_path, strict=strict)
+        return instance
+
 
     def _contract_core_only(self, engine=ContractorOptEinsum):
         """
@@ -454,12 +493,12 @@ class QCTN:
 
         return engine.contract_core_only(self)
 
-    def _contract_with_inputs(self, inputs: jnp.ndarray = None, engine=ContractorOptEinsum):
+    def _contract_with_inputs(self, inputs: Any = None, engine=ContractorOptEinsum):
         """
         Contract the quantum circuit tensor network with given inputs.
 
         Args:
-            inputs (jnp.ndarray): The inputs for the contraction operation.
+            inputs (Any): The inputs for the contraction operation.
                 It should be a tensor with the shape matching the input ranks of the circuit.
 
         Returns:
@@ -469,8 +508,8 @@ class QCTN:
         # Validate inputs
         if inputs is None:
             raise ValueError("Inputs must be provided for contraction.")
-        if not isinstance(inputs, jnp.ndarray):
-            raise TypeError("Inputs must be a jnp.ndarray.")
+        if not isinstance(inputs, self.backend.get_tensor_type()):
+            raise TypeError(f"Inputs must be a {self.backend.get_tensor_type()}.")
         if inputs.shape != tuple(itertools.chain.from_iterable(self.circuit[0])):
             raise ValueError(f"Input tensor shape {inputs.shape} does not match expected shape {tuple(itertools.chain.from_iterable(self.circuit[0]))}.")
 
@@ -481,7 +520,7 @@ class QCTN:
         Contract the quantum circuit tensor network with given inputs.
 
         Args:
-            inputs (jnp.ndarray): The inputs for the contraction operation.
+            inputs (list): The inputs for the contraction operation.
                 It should be a tensor with the shape matching the input ranks of the circuit.
 
         Returns:
@@ -491,8 +530,8 @@ class QCTN:
         # Validate inputs
         if inputs is None:
             raise ValueError("Inputs must be provided for contraction.")
-        if not all(isinstance(t, jnp.ndarray) for t in inputs):
-            raise TypeError("All elements in the list must be jnp.ndarray.")
+        if not all(isinstance(t, self.backend.get_tensor_type()) for t in inputs):
+            raise TypeError(f"All elements in the list must be {self.backend.get_tensor_type()}.")
         if len(inputs) != self.nqubits:
             raise ValueError(f"Expected {self.nqubits} input vectors, got {len(inputs)}.")
         
@@ -541,14 +580,14 @@ class QCTN:
 
         return engine.contract_with_QCTN_for_gradient(self, qctn)
 
-    def contract(self, attach: Union[jnp.ndarray, 'QCTN', list] = None, engine=ContractorOptEinsum):
+    def contract(self, attach: Union[Any, 'QCTN', list] = None, engine=ContractorOptEinsum):
         """
         Contract the quantum circuit tensor network.
 
         Args:
-            attach (Union[jnp.ndarray, list[jnp.ndarray], 'QCTN'], optional): The inputs for the contraction operation.
-                If a jnp.ndarray is provided, it should be a tensor with the shape matching the input ranks of the circuit.
-                If a list of jnp.ndarray is provided, it should contain vectors for each qubit.
+            attach (Union[Any, list[Any], 'QCTN'], optional): The inputs for the contraction operation.
+                If a tensor is provided, it should be a tensor with the shape matching the input ranks of the circuit.
+                If a list of tensors is provided, it should contain vectors for each qubit.
                 If a QCTN instance is provided, it will contract with that instance.
             engine (ContractorOptEinsum): The contraction engine to use. Default is ContractorOptEinsum.
 
@@ -558,17 +597,17 @@ class QCTN:
 
         if attach is None:
             return self._contract_core_only(engine)
-        elif isinstance(attach, jnp.ndarray):
-            print('contract with jnp.ndarray')
+        elif isinstance(attach, self.backend.get_tensor_type()):
+            print('contract with tensor')
             return self._contract_with_inputs(attach, engine)
         elif isinstance(attach, list):
-            print('contract with list of jnp.ndarray')
+            print('contract with list of tensors')
             return self._contract_with_vector_inputs(attach, engine)
         elif isinstance(attach, QCTN):
             print('contract with QCTN')
             return self._contract_with_QCTN(attach, engine)
         else:
-            raise TypeError("attach must be a jnp.ndarray, a list of jnp.ndarray or an instance of QCTN.")
+            raise TypeError(f"attach must be a {self.backend.get_tensor_type()}, a list of {self.backend.get_tensor_type()} or an instance of QCTN.")
     
     def _contract_with_self(self, engine=ContractorOptEinsum, circuit_array_input=None, circuit_list_input=None):
         """
@@ -596,7 +635,7 @@ class QCTN:
 
         return engine.contract_with_self_for_gradient(self, circuit_array_input, circuit_list_input)
 
-    def contract_with_self(self, attach: Union[jnp.ndarray, 'QCTN', list] = None, engine=ContractorOptEinsum):
+    def contract_with_self(self, attach: Union[Any, 'QCTN', list] = None, engine=ContractorOptEinsum):
         """
         Contract the quantum circuit tensor network with itself.
 
@@ -608,7 +647,7 @@ class QCTN:
         """
         if attach is None:
             return self._contract_with_self(engine)
-        elif isinstance(attach, jnp.ndarray):
+        elif isinstance(attach, self.backend.get_tensor_type()):
             return self._contract_with_self(engine, circuit_array_input=attach)
         elif isinstance(attach, list):
             raise TypeError("attach must be None when contracting with self.")
@@ -617,7 +656,7 @@ class QCTN:
         else:
             raise TypeError("attach must be None when contracting with self.")
     
-    def contract_with_self_for_gradient(self, attach: Union[jnp.ndarray, 'QCTN', list] = None, engine=ContractorOptEinsum):
+    def contract_with_self_for_gradient(self, attach: Union[Any, 'QCTN', list] = None, engine=ContractorOptEinsum):
         """
         Contract the quantum circuit tensor network with itself.
 
@@ -629,7 +668,7 @@ class QCTN:
         """
         if attach is None:
             return self._contract_with_self_for_gradient(engine)
-        elif isinstance(attach, jnp.ndarray):
+        elif isinstance(attach, self.backend.get_tensor_type()):
             return self._contract_with_self_for_gradient(engine, circuit_array_input=attach)
         elif isinstance(attach, list):
             raise TypeError("attach must be None when contracting with self.")

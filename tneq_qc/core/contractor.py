@@ -2,7 +2,6 @@
 Contractor module for generating tensor contraction expressions and managing strategies.
 
 This module provides:
-- TensorContractor: Original einsum expression generation (kept for compatibility)
 - ContractionStrategy: Abstract base class for contraction strategies
 - Concrete strategies: EinsumStrategy, MPSChainStrategy
 - StrategyCompiler: Compiles and selects optimal strategy based on mode
@@ -21,55 +20,55 @@ import numpy as np
 # ============================================================================
 
 class ContractionStrategy(ABC):
-    """收缩策略抽象基类"""
+    """Abstract base class for contraction strategies"""
     
     @abstractmethod
     def check_compatibility(self, qctn, shapes_info: Dict[str, Any]) -> bool:
         """
-        检查网络结构是否符合该策略要求
+        Check if the network structure is compatible with this strategy.
         
         Args:
-            qctn: QCTN对象
-            shapes_info: dict，包含 circuit_states_shapes, measure_shapes 等
+            qctn: QCTN object
+            shapes_info: dict, containing circuit_states_shapes, measure_shapes etc.
         
         Returns:
-            bool: 是否兼容
+            bool: Whether it is compatible
         """
         pass
     
     @abstractmethod
     def get_compute_function(self, qctn, shapes_info: Dict[str, Any], backend) -> Callable:
         """
-        生成计算函数
+        Generate computation function.
         
         Args:
-            qctn: QCTN对象
-            shapes_info: 形状信息
-            backend: 后端
+            qctn: QCTN object
+            shapes_info: Shape information
+            backend: Backend
         
         Returns:
-            Callable: 计算函数 compute_fn(cores_dict, circuit_states, measure_matrices)
+            Callable: compute_fn(cores_dict, circuit_states, measure_matrices)
         """
         pass
     
     @abstractmethod
     def estimate_cost(self, qctn, shapes_info: Dict[str, Any]) -> float:
         """
-        估算计算代价（FLOPs）
+        Estimate computation cost (FLOPs).
         
         Args:
-            qctn: QCTN对象
-            shapes_info: 形状信息
+            qctn: QCTN object
+            shapes_info: Shape information
         
         Returns:
-            float: 估算的 FLOPs
+            float: Estimated FLOPs
         """
         pass
     
     @property
     @abstractmethod
     def name(self) -> str:
-        """策略名称"""
+        """Strategy name"""
         pass
 
 
@@ -78,45 +77,44 @@ class ContractionStrategy(ABC):
 # ============================================================================
 
 class EinsumStrategy(ContractionStrategy):
-    """直接使用 opt_einsum 的策略（Fast mode）"""
+    """Strategy using opt_einsum directly (Fast mode)"""
     
     def check_compatibility(self, qctn, shapes_info: Dict[str, Any]) -> bool:
-        """einsum 可以处理任何结构"""
+        """einsum can handle any structure"""
         return True
     
     def get_compute_function(self, qctn, shapes_info: Dict[str, Any], backend) -> Callable:
         """
-        返回使用 opt_einsum 的计算函数
+        Return computation function using opt_einsum.
         
-        使用现有的 build_with_self_expression 生成 einsum 表达式
+        Use existing build_with_self_expression to generate einsum expression.
         """
-        # 获取形状信息
+        # Get shape info
         circuit_states_shapes = shapes_info.get('circuit_states_shapes')
         measure_shapes = shapes_info.get('measure_shapes')
         measure_is_matrix = shapes_info.get('measure_is_matrix', True)
         
-        # 生成 einsum 表达式
-        contractor = TensorContractor()
-        einsum_eq, tensor_shapes = contractor.build_with_self_expression(
+        # Generate einsum expression
+        einsum_eq, tensor_shapes = self.build_with_self_expression(
             qctn, circuit_states_shapes, measure_shapes, measure_is_matrix
         )
         
-        # 创建优化的表达式
-        expr = contractor.create_contract_expression(einsum_eq, tensor_shapes, optimize='auto')
+        # Create optimized expression
+        expr = self.create_contract_expression(einsum_eq, tensor_shapes, optimize='auto')
         
         def compute_fn(cores_dict, circuit_states, measure_matrices):
             """
-            使用 einsum 表达式计算
+            Compute using einsum expression.
             
             Args:
-                cores_dict: {core_name: core_tensor} 字典
-                circuit_states: 电路输入态列表
-                measure_matrices: 测量矩阵列表
+                cores_dict: {core_name: core_tensor} dictionary
+                circuit_states: List of circuit input states
+                measure_matrices: List of measurement matrices
             
             Returns:
-                收缩结果
+                Contraction result
             """
-            # 按顺序准备张量
+            # Prepare tensors in order
             tensors = []
             
             # Add circuit_states
@@ -155,276 +153,30 @@ class EinsumStrategy(ContractionStrategy):
         return compute_fn
     
     def estimate_cost(self, qctn, shapes_info: Dict[str, Any]) -> float:
-        """使用 opt_einsum 估算代价"""
+        """Estimate cost using opt_einsum"""
         circuit_states_shapes = shapes_info.get('circuit_states_shapes')
         measure_shapes = shapes_info.get('measure_shapes')
         measure_is_matrix = shapes_info.get('measure_is_matrix', True)
         
-        contractor = TensorContractor()
-        einsum_eq, tensor_shapes = contractor.build_with_self_expression(
+        einsum_eq, tensor_shapes = self.build_with_self_expression(
             qctn, circuit_states_shapes, measure_shapes, measure_is_matrix
         )
         
-        try:
-            # 使用 opt_einsum 估算代价
-            path_info = opt_einsum.contract_path(einsum_eq, *tensor_shapes, optimize='auto')
-            return float(path_info[1].opt_cost)
-        except:
-            # 如果估算失败，返回一个较大的值
-            return float('inf')
+        # try:
+        #     # Estimate cost using opt_einsum
+        #     path_info = opt_einsum.contract_path(einsum_eq, *tensor_shapes, optimize='auto')
+        #     return float(path_info[1].opt_cost)
+        # except:
+        #     # Return a large value if estimation fails
+        #     return float('inf')
+
+        # Estimate cost using opt_einsum
+        path_info = opt_einsum.contract_path(einsum_eq, *tensor_shapes, optimize='auto')
+        return float(path_info[1].opt_cost)
     
     @property
     def name(self) -> str:
         return "einsum_default"
-
-
-class MPSChainStrategy(ContractionStrategy):
-    """针对 MPS 链式结构的优化策略（Balanced/Full mode）"""
-    
-    def check_compatibility(self, qctn, shapes_info: Dict[str, Any]) -> bool:
-        """
-        检查是否为链式结构
-        
-        目前简化实现：直接返回 True
-        未来可以添加更严格的拓扑检查
-        """
-        # TODO: 实现更严格的链式结构检查
-        # 1. 检查拓扑是否为链
-        # 2. 检查每个 core 的连接方式
-        # 3. 检查输入输出维度是否符合预期
-        
-        return True
-    
-    def get_compute_function(self, qctn, shapes_info: Dict[str, Any], backend) -> Callable:
-        """
-        返回 MPS 链式收缩的计算函数
-        
-        这是类似 contract_with_std_graph 的实现
-        """
-        def compute_fn(cores_dict, circuit_states, measure_matrices):
-            """
-            MPS 链式收缩
-            
-            Args:
-                cores_dict: {core_name: core_tensor} 字典
-                circuit_states: 电路输入态列表
-                measure_matrices: 测量矩阵列表
-            
-            Returns:
-                收缩结果
-            """
-            import torch
-            
-            new_core_dict = {}
-            
-            # Step 1: Contract cores with circuit_states
-            for idx, core_name in enumerate(qctn.cores):
-                core_tensor = cores_dict[core_name]
-                
-                if idx == 0:
-                    # 第一个 core 收缩两个 state
-                    state1 = circuit_states[0]
-                    state2 = circuit_states[1]
-                    contracted = torch.einsum('i,j,ij...->...', state1, state2, core_tensor)
-                else:
-                    # 其他 core 收缩一个 state
-                    state = circuit_states[idx + 1]
-                    contracted = torch.einsum('i,ji...->j...', state, core_tensor)
-                
-                new_core_dict[core_name] = contracted
-            
-            # Step 2: Chain contraction with measurements
-            n = len(new_core_dict)
-            
-            for idx in range(n):
-                if idx == 0:
-                    core_tensor = new_core_dict[qctn.cores[idx]]
-                    measure_matrix = measure_matrices[idx]
-                    contracted = torch.einsum('ka,zkl,lb->zab', 
-                                             core_tensor, measure_matrix, core_tensor)
-                    
-                elif idx < n - 1:
-                    core_tensor = new_core_dict[qctn.cores[idx]]
-                    measure_matrix = measure_matrices[idx]
-                    contracted = torch.einsum('zab,akc,zkl,bld->zcd', 
-                                             contracted, core_tensor, 
-                                             measure_matrix, core_tensor)
-                else:
-                    core_tensor = new_core_dict[qctn.cores[idx]]
-                    measure_matrix_1 = measure_matrices[idx]
-                    measure_matrix_2 = measure_matrices[idx + 1]
-                    contracted = torch.einsum('zab,akc,zkl,zcd,bld->z', 
-                                             contracted, core_tensor, 
-                                             measure_matrix_1, measure_matrix_2, core_tensor)
-            
-            return contracted
-        
-        return compute_fn
-    
-    def estimate_cost(self, qctn, shapes_info: Dict[str, Any]) -> float:
-        """
-        估算 MPS 链式收缩的代价
-        
-        目前简化实现：返回一个较小的固定值
-        未来可以基于每一步 einsum 的维度精确估算
-        """
-        # TODO: 实现精确的 FLOPs 估算
-        # 基于每一步 einsum 的维度计算
-        
-        circuit_states_shapes = shapes_info.get('circuit_states_shapes', [])
-        measure_shapes = shapes_info.get('measure_shapes', [])
-        
-        # 简化估算：假设 MPS 策略通常比 einsum 更优
-        total_flops = 1e6  # 返回一个较小的固定值
-        
-        return total_flops
-    
-    @property
-    def name(self) -> str:
-        return "mps_chain"
-
-
-# ============================================================================
-# Strategy Compiler
-# ============================================================================
-
-class StrategyCompiler:
-    """策略编译器，负责选择和编译最优策略"""
-    
-    # 三种模式对应的策略列表
-    MODES = {
-        'fast': ['einsum_default'],
-        'balanced': ['einsum_default', 'mps_chain'],
-        'full': ['einsum_default', 'mps_chain']
-    }
-    
-    def __init__(self, mode: str = 'fast'):
-        """
-        初始化编译器
-        
-        Args:
-            mode: 'fast', 'balanced', 或 'full'
-        """
-        if mode not in self.MODES:
-            raise ValueError(f"Invalid mode '{mode}'. Must be one of {list(self.MODES.keys())}")
-        
-        self.mode = mode
-        self.strategies: Dict[str, ContractionStrategy] = {}
-        self._register_strategies()
-    
-    def _register_strategies(self):
-        """注册所有可用策略"""
-        # Fast mode
-        self.strategies['einsum_default'] = EinsumStrategy()
-        
-        # Balanced/Full mode
-        self.strategies['mps_chain'] = MPSChainStrategy()
-        
-        # TODO: 未来可以添加更多策略
-        # self.strategies['tree_contraction'] = TreeContractionStrategy()
-        # self.strategies['greedy_path'] = GreedyPathStrategy()
-    
-    def compile(self, qctn, shapes_info: Dict[str, Any], backend) -> Tuple[Callable, str, float]:
-        """
-        编译：选择最优策略并返回计算函数
-        
-        编译过程：
-        1. 检查结构兼容性
-        2. 估算代价
-        3. 生成计算函数
-        4. 选择代价最低的策略
-        
-        Args:
-            qctn: QCTN对象
-            shapes_info: 形状信息 dict
-            backend: 计算后端
-        
-        Returns:
-            tuple: (compute_fn, strategy_name, estimated_cost)
-        """
-        # 获取当前模式下的策略列表
-        strategy_names = self.MODES[self.mode]
-        
-        candidates = []
-        
-        print(f"[Compiler] Mode: {self.mode}, Testing {len(strategy_names)} strategies...")
-        
-        # 遍历所有候选策略
-        for name in strategy_names:
-            strategy = self.strategies[name]
-            
-            # 1. 检查兼容性
-            try:
-                is_compatible = strategy.check_compatibility(qctn, shapes_info)
-                print(f"  [{name}] Compatibility: {is_compatible}")
-                
-                if not is_compatible:
-                    continue
-            except Exception as e:
-                print(f"  [{name}] Compatibility check failed: {e}")
-                continue
-            
-            # 2. 估算代价
-            try:
-                cost = strategy.estimate_cost(qctn, shapes_info)
-                print(f"  [{name}] Estimated cost: {cost:.2e} FLOPs")
-            except Exception as e:
-                print(f"  [{name}] Cost estimation failed: {e}")
-                cost = float('inf')
-            
-            # 3. 生成计算函数
-            try:
-                compute_fn = strategy.get_compute_function(qctn, shapes_info, backend)
-            except Exception as e:
-                print(f"  [{name}] Function generation failed: {e}")
-                continue
-            
-            candidates.append({
-                'name': name,
-                'strategy': strategy,
-                'compute_fn': compute_fn,
-                'cost': cost
-            })
-        
-        # 选择代价最低的策略
-        if not candidates:
-            raise RuntimeError("No compatible strategy found!")
-        
-        best = min(candidates, key=lambda x: x['cost'])
-        print(f"[Compiler] Selected strategy: {best['name']} (cost: {best['cost']:.2e})")
-        
-        return best['compute_fn'], best['name'], best['cost']
-    
-    def register_custom_strategy(self, strategy: ContractionStrategy, modes: List[str]):
-        """
-        注册自定义策略
-        
-        Args:
-            strategy: 策略实例
-            modes: 要注册到哪些模式，如 ['balanced', 'full']
-        """
-        self.strategies[strategy.name] = strategy
-        
-        for mode in modes:
-            if mode in self.MODES:
-                if strategy.name not in self.MODES[mode]:
-                    self.MODES[mode].append(strategy.name)
-
-
-# ============================================================================
-# Original TensorContractor (kept for compatibility)
-# ============================================================================
-
-class TensorContractor:
-    """
-    TensorContractor class for generating optimized tensor contraction expressions.
-    
-    This class uses opt_einsum to generate contraction expressions but does not
-    execute them. The execution is delegated to backend implementations.
-    
-    Note: This class is kept for compatibility with existing code that uses
-    build_with_self_expression, build_core_only_expression, etc.
-    """
 
     @staticmethod
     def build_core_only_expression(qctn) -> Tuple[str, List]:
@@ -446,7 +198,7 @@ class TensorContractor:
 
         adjacency_matrix_for_interaction = adjacency_matrix.copy()
 
-        from .tenmul_qc import QCTNHelper
+        from .qctn import QCTNHelper
         for element in QCTNHelper.jax_triu_ndindex(len(cores_name)):
             i, j = element
             if adjacency_matrix_for_interaction[i, j]:
@@ -499,7 +251,7 @@ class TensorContractor:
 
         adjacency_matrix_for_interaction = adjacency_matrix.copy()
 
-        from .tenmul_qc import QCTNHelper
+        from .qctn import QCTNHelper
         for element in QCTNHelper.jax_triu_ndindex(len(cores_name)):
             i, j = element
             if adjacency_matrix_for_interaction[i, j]:
@@ -553,7 +305,7 @@ class TensorContractor:
 
         adjacency_matrix_for_interaction = adjacency_matrix.copy()
 
-        from .tenmul_qc import QCTNHelper
+        from .qctn import QCTNHelper
         for element in QCTNHelper.jax_triu_ndindex(len(cores_name)):
             i, j = element
             if adjacency_matrix_for_interaction[i, j]:
@@ -611,7 +363,7 @@ class TensorContractor:
 
         adjacency_matrix_for_interaction = adjacency_matrix.copy()
 
-        from .tenmul_qc import QCTNHelper
+        from .qctn import QCTNHelper
         for element in QCTNHelper.jax_triu_ndindex(len(cores_name)):
             i, j = element
             if adjacency_matrix_for_interaction[i, j]:
@@ -699,7 +451,7 @@ class TensorContractor:
 
         adjacency_matrix_for_interaction = adjacency_matrix.copy()
 
-        from .tenmul_qc import QCTNHelper
+        from .qctn import QCTNHelper
         for element in QCTNHelper.jax_triu_ndindex(len(cores_name)):
             i, j = element
             if adjacency_matrix_for_interaction[i, j]:
@@ -888,3 +640,264 @@ class TensorContractor:
             *tensor_shapes, 
             optimize=optimize if optimize != 'auto' else Configuration.opt_einsum_optimize
         )
+
+
+class MPSChainStrategy(ContractionStrategy):
+    """Optimization strategy for MPS chain structure (Balanced/Full mode)"""
+    
+    def check_compatibility(self, qctn, shapes_info: Dict[str, Any]) -> bool:
+        """
+        Check if it is a chain structure.
+        
+        Currently simplified implementation: returns True directly.
+        More strict topology checks can be added in the future.
+        """
+        # TODO: Implement stricter chain structure check
+        # 1. Check if topology is a chain
+        # 2. Check connection method of each core
+        # 3. Check if input/output dimensions meet expectations
+        
+        return True
+    
+    def get_compute_function(self, qctn, shapes_info: Dict[str, Any], backend) -> Callable:
+        """
+        Return computation function for MPS chain contraction.
+        
+        This is similar to contract_with_std_graph implementation.
+        """
+        def compute_fn(cores_dict, circuit_states, measure_matrices):
+            """
+            MPS chain contraction.
+            
+            Args:
+                cores_dict: {core_name: core_tensor} dictionary
+                circuit_states: List of circuit input states
+                measure_matrices: List of measurement matrices
+            
+            Returns:
+                Contraction result
+            """
+            import torch
+            
+            new_core_dict = {}
+            
+            # Step 1: Contract cores with circuit_states
+            for idx, core_name in enumerate(qctn.cores):
+                core_tensor = cores_dict[core_name]
+                
+                if idx == 0:
+                    # First core contracts two states
+                    state1 = circuit_states[0]
+                    state2 = circuit_states[1]
+                    contracted = torch.einsum('i,j,ij...->...', state1, state2, core_tensor)
+                else:
+                    # Other cores contract one state
+                    state = circuit_states[idx + 1]
+                    contracted = torch.einsum('i,ji...->j...', state, core_tensor)
+                
+                new_core_dict[core_name] = contracted
+            
+            print('new_core_dict', [(core_name, new_core_dict[core_name].shape) for core_name in new_core_dict])
+
+            # Step 2: Chain contraction with measurements
+            n = len(new_core_dict)
+            
+            if n == 1:
+                core_tensor = new_core_dict[qctn.cores[0]]
+                measure_matrix_1 = measure_matrices[0]
+                measure_matrix_2 = measure_matrices[1]
+                contracted = torch.einsum('ka,zkl,zab,lb->z', 
+                                         core_tensor, measure_matrix_1, 
+                                         measure_matrix_2, core_tensor)
+                return contracted
+
+            for idx in range(n):
+                
+                if idx == 0:
+                    core_tensor = new_core_dict[qctn.cores[idx]]
+                    measure_matrix = measure_matrices[idx]
+                    contracted = torch.einsum('ka,zkl,lb->zab', 
+                                             core_tensor, measure_matrix, core_tensor)
+                    
+                elif idx < n - 1:
+                    core_tensor = new_core_dict[qctn.cores[idx]]
+                    measure_matrix = measure_matrices[idx]
+                    contracted = torch.einsum('zab,akc,zkl,bld->zcd', 
+                                             contracted, core_tensor, 
+                                             measure_matrix, core_tensor)
+                else:
+                    core_tensor = new_core_dict[qctn.cores[idx]]
+                    measure_matrix_1 = measure_matrices[idx]
+                    measure_matrix_2 = measure_matrices[idx + 1]
+                    contracted = torch.einsum('zab,akc,zkl,zcd,bld->z', 
+                                             contracted, core_tensor, 
+                                             measure_matrix_1, measure_matrix_2, core_tensor)
+                
+                print('contract step', idx, contracted.shape)
+
+            return contracted
+        
+        return compute_fn
+    
+    def estimate_cost(self, qctn, shapes_info: Dict[str, Any]) -> float:
+        """
+        Estimate cost of MPS chain contraction.
+        
+        Currently simplified implementation: returns a small fixed value.
+        Future implementation can estimate precisely based on dimensions of each einsum step.
+        """
+        # TODO: Implement precise FLOPs estimation
+        # Calculate based on dimensions of each einsum step
+        
+        circuit_states_shapes = shapes_info.get('circuit_states_shapes', [])
+        measure_shapes = shapes_info.get('measure_shapes', [])
+        
+        # Simplified estimation: assume MPS strategy is usually better than einsum
+        total_flops = 1e6  # Return a small fixed value
+        
+        return total_flops
+    
+    @property
+    def name(self) -> str:
+        return "mps_chain"
+
+
+# ============================================================================
+# Strategy Compiler
+# ============================================================================
+
+class StrategyCompiler:
+    """Strategy compiler, responsible for selecting and compiling the optimal strategy"""
+    
+    # Strategy list for three modes
+    MODES = {
+        'fast': ['einsum_default'],
+        'balanced': ['mps_chain'],
+        'full': ['mps_chain']
+    }
+    
+    def __init__(self, mode: str = 'fast'):
+        """
+        Initialize compiler
+        
+        Args:
+            mode: 'fast', 'balanced', or 'full'
+        """
+        if mode not in self.MODES:
+            raise ValueError(f"Invalid mode '{mode}'. Must be one of {list(self.MODES.keys())}")
+        
+        self.mode = mode
+        self.strategies: Dict[str, ContractionStrategy] = {}
+        self._register_strategies()
+    
+    def _register_strategies(self):
+        """Register all available strategies"""
+        # Fast mode
+        self.strategies['einsum_default'] = EinsumStrategy()
+        
+        # Balanced/Full mode
+        self.strategies['mps_chain'] = MPSChainStrategy()
+        
+        # TODO: Add more strategies in the future
+        # self.strategies['tree_contraction'] = TreeContractionStrategy()
+        # self.strategies['greedy_path'] = GreedyPathStrategy()
+    
+    def compile(self, qctn, shapes_info: Dict[str, Any], backend) -> Tuple[Callable, str, float]:
+        """
+        Compile: Select optimal strategy and return computation function
+        
+        Compilation process:
+        1. Check structure compatibility
+        2. Estimate cost
+        3. Generate computation function
+        4. Select strategy with lowest cost
+        
+        Args:
+            qctn: QCTN object
+            shapes_info: Shape information dict
+            backend: Computation backend
+        
+        Returns:
+            tuple: (compute_fn, strategy_name, estimated_cost)
+        """
+        # Get strategy list for current mode
+        strategy_names = self.MODES[self.mode]
+        
+        candidates = []
+        
+        print(f"[Compiler] Mode: {self.mode}, Testing {len(strategy_names)} strategies...")
+        
+        # Iterate over all candidate strategies
+        for name in strategy_names:
+            strategy = self.strategies[name]
+            
+            # 1. Check compatibility
+            # try:
+            #     is_compatible = strategy.check_compatibility(qctn, shapes_info)
+            #     print(f"  [{name}] Compatibility: {is_compatible}")
+            #     
+            #     if not is_compatible:
+            #         continue
+            # except Exception as e:
+            #     print(f"  [{name}] Compatibility check failed: {e}")
+            #     continue
+
+            is_compatible = strategy.check_compatibility(qctn, shapes_info)
+            print(f"  [{name}] Compatibility: {is_compatible}")
+            
+            if not is_compatible:
+                continue
+            
+            # 2. Estimate cost
+            # try:
+            #     cost = strategy.estimate_cost(qctn, shapes_info)
+            #     print(f"  [{name}] Estimated cost: {cost:.2e} FLOPs")
+            # except Exception as e:
+            #     print(f"  [{name}] Cost estimation failed: {e}")
+            #     cost = float('inf')
+
+            cost = strategy.estimate_cost(qctn, shapes_info)
+            print(f"  [{name}] Estimated cost: {cost:.2e} FLOPs")
+            
+            # 3. Generate computation function
+            # try:
+            #     compute_fn = strategy.get_compute_function(qctn, shapes_info, backend)
+            # except Exception as e:
+            #     print(f"  [{name}] Function generation failed: {e}")
+            #     continue
+
+            compute_fn = strategy.get_compute_function(qctn, shapes_info, backend)
+            
+            candidates.append({
+                'name': name,
+                'strategy': strategy,
+                'compute_fn': compute_fn,
+                'cost': cost
+            })
+        
+        # Select strategy with lowest cost
+        if not candidates:
+            raise RuntimeError("No compatible strategy found!")
+        
+        best = min(candidates, key=lambda x: x['cost'])
+        print(f"[Compiler] Selected strategy: {best['name']} (cost: {best['cost']:.2e})")
+        
+        return best['compute_fn'], best['name'], best['cost']
+    
+    def register_custom_strategy(self, strategy: ContractionStrategy, modes: List[str]):
+        """
+        Register custom strategy
+        
+        Args:
+            strategy: Strategy instance
+            modes: Which modes to register to, e.g. ['balanced', 'full']
+        """
+        self.strategies[strategy.name] = strategy
+        
+        for mode in modes:
+            if mode in self.MODES:
+                if strategy.name not in self.MODES[mode]:
+                    self.MODES[mode].append(strategy.name)
+
+
+

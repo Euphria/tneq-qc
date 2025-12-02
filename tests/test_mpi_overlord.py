@@ -20,7 +20,7 @@ if __package__ is None or __package__ == '':
 
 from tneq_qc.distributed.mpi_overlord import MPI_Overlord
 from tneq_qc.distributed.mpi_agent import MPI_Agent
-from tneq_qc.core.tenmul_qc import QCTN, QCTNHelper
+from tneq_qc.core.qctn import QCTN, QCTNHelper
 from tneq_qc.log_utils import setup_colored_logger
 
 
