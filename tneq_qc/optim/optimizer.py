@@ -15,7 +15,7 @@ class Optimizer:
                    beta1=0.9, # Adam's first moment estimate decay rate
                    beta2=0.999, # Adam's second moment estimate decay rate
                    epsilon=1e-8, # Small constant to prevent division by zero
-                   executor=None,
+                   engine=None,
                    lr_schedule: Optional[list] = None,
                    # SGDG parameters
                    momentum=0.0, # Momentum factor for SGDG
@@ -34,7 +34,7 @@ class Optimizer:
         self.stiefel = stiefel
         self.lr_schedule = lr_schedule
 
-        self.executor = executor
+        self.engine = engine
         self.opt_state = {}
 
     def _apply_lr_schedule(self):
@@ -73,9 +73,9 @@ class Optimizer:
         while self.iter < self.max_iter:
             # TODO: impl general function named contract_for_gradient
             data_index = self.iter % len(data_list)
-            # loss, grads = self.executor.contract_with_self_for_gradient(qctn, **data_list[data_index], **kwargs)
-            # loss, grads = self.executor.contract_with_std_graph_for_gradient(qctn, **data_list[data_index], **kwargs)
-            loss, grads = self.executor.contract_with_compiled_strategy_for_gradient(qctn, **data_list[data_index], **kwargs)
+            # loss, grads = self.engine.contract_with_self_for_gradient(qctn, **data_list[data_index], **kwargs)
+            # loss, grads = self.engine.contract_with_std_graph_for_gradient(qctn, **data_list[data_index], **kwargs)
+            loss, grads = self.engine.contract_with_compiled_strategy_for_gradient(qctn, **data_list[data_index], **kwargs)
 
             # Convert loss to scalar for comparison and printing
             loss_value = float(loss) if hasattr(loss, 'item') else loss
@@ -108,7 +108,7 @@ class Optimizer:
         while self.iter < self.max_iter:
             # TODO: impl general function named contract_for_gradient
             data_index = self.iter % len(data_list)
-            loss, grads = self.executor.contract_with_self_for_gradient(qctn, **data_list[data_index], **kwargs)
+            loss, grads = self.engine.contract_with_self_for_gradient(qctn, **data_list[data_index], **kwargs)
             
             # Convert loss to scalar for comparison and printing
             loss_value = float(loss) if hasattr(loss, 'item') else loss
@@ -225,7 +225,7 @@ class Optimizer:
             'stiefel': self.stiefel
         }
         
-        new_params_list, new_state = self.executor.backend.optimizer_update(
+        new_params_list, new_state = self.engine.backend.optimizer_update(
             params_list, grads, self.opt_state, self.method, hyperparams
         )
         

@@ -4,14 +4,14 @@ Unit tests for the refactored contract and backend architecture.
 Tests cover:
 1. BackendFactory - backend creation and management
 2. TensorContractor - einsum expression generation
-3. ContractExecutor - contraction execution with different backends
+3. Engine - contraction execution with different backends
 4. Backend comparison - JAX vs PyTorch equivalence
 """
 
 import unittest
 import numpy as np
 from tneq_qc.backends import BackendFactory, JAXBackend, PyTorchBackend
-from tneq_qc.core import TensorContractor, ContractExecutor, QCTN
+from tneq_qc.core import TensorContractor, Engine, QCTN
 
 
 class TestBackendFactory(unittest.TestCase):
@@ -141,8 +141,8 @@ class TestTensorContractor(unittest.TestCase):
         self.assertTrue(callable(expr))
 
 
-class TestContractExecutorJAX(unittest.TestCase):
-    """Test ContractExecutor with JAX backend."""
+class TestEngineJAX(unittest.TestCase):
+    """Test Engine with JAX backend."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -152,17 +152,17 @@ class TestContractExecutorJAX(unittest.TestCase):
             "-2-A-2-"
         )
         self.qctn = QCTN(self.graph_string)
-        self.executor = ContractExecutor(backend='jax')
+        self.engine = Engine(backend='jax')
 
     def test_executor_initialization(self):
         """Test executor initialization."""
-        self.assertIsNotNone(self.executor.backend)
-        self.assertEqual(self.executor.backend.get_backend_name(), 'jax')
-        self.assertIsNotNone(self.executor.contractor)
+        self.assertIsNotNone(self.engine.backend)
+        self.assertEqual(self.engine.backend.get_backend_name(), 'jax')
+        self.assertIsNotNone(self.engine.contractor)
 
     def test_contract_core_only(self):
         """Test core-only contraction."""
-        result = self.executor.contract_core_only(self.qctn)
+        result = self.engine.contract_core_only(self.qctn)
         
         self.assertIsNotNone(result)
         self.assertTrue(hasattr(result, 'shape'))
@@ -172,7 +172,7 @@ class TestContractExecutorJAX(unittest.TestCase):
     def test_contract_with_inputs(self):
         """Test contraction with inputs."""
         inputs = np.random.rand(2, 2, 2).astype(np.float32)
-        result = self.executor.contract_with_inputs(self.qctn, inputs)
+        result = self.engine.contract_with_inputs(self.qctn, inputs)
         
         self.assertIsNotNone(result)
         self.assertTrue(hasattr(result, 'shape'))
@@ -184,7 +184,7 @@ class TestContractExecutorJAX(unittest.TestCase):
             np.random.rand(2).astype(np.float32),
             np.random.rand(2).astype(np.float32)
         ]
-        result = self.executor.contract_with_vector_inputs(self.qctn, inputs)
+        result = self.engine.contract_with_vector_inputs(self.qctn, inputs)
         
         self.assertIsNotNone(result)
         self.assertTrue(hasattr(result, 'shape'))
@@ -192,7 +192,7 @@ class TestContractExecutorJAX(unittest.TestCase):
     def test_contract_with_qctn(self):
         """Test contraction with another QCTN."""
         target_qctn = QCTN(self.graph_string)
-        result = self.executor.contract_with_qctn(self.qctn, target_qctn)
+        result = self.engine.contract_with_qctn(self.qctn, target_qctn)
         
         self.assertIsNotNone(result)
         # Result should be a scalar for complete contraction
@@ -200,7 +200,7 @@ class TestContractExecutorJAX(unittest.TestCase):
 
     def test_contract_with_self(self):
         """Test contraction with self."""
-        result = self.executor.contract_with_self(self.qctn)
+        result = self.engine.contract_with_self(self.qctn)
         
         self.assertIsNotNone(result)
         # Result should be a scalar
@@ -209,14 +209,14 @@ class TestContractExecutorJAX(unittest.TestCase):
     def test_contract_with_self_with_input(self):
         """Test contraction with self and input."""
         inputs = np.random.rand(2, 2, 2).astype(np.float32)
-        result = self.executor.contract_with_self(self.qctn, inputs)
+        result = self.engine.contract_with_self(self.qctn, inputs)
         
         self.assertIsNotNone(result)
         self.assertTrue(hasattr(result, 'shape'))
 
     def test_contract_with_self_for_gradient(self):
         """Test contraction with self and gradient computation."""
-        loss, grads = self.executor.contract_with_self_for_gradient(self.qctn)
+        loss, grads = self.engine.contract_with_self_for_gradient(self.qctn)
         
         self.assertIsNotNone(loss)
         self.assertIsInstance(grads, (list, tuple))
@@ -231,7 +231,7 @@ class TestContractExecutorJAX(unittest.TestCase):
     def test_contract_with_self_for_gradient_with_input(self):
         """Test contraction with self and gradient computation with input."""
         inputs = np.random.rand(2, 2, 2).astype(np.float32)
-        loss, grads = self.executor.contract_with_self_for_gradient(self.qctn, inputs)
+        loss, grads = self.engine.contract_with_self_for_gradient(self.qctn, inputs)
         
         self.assertIsNotNone(loss)
         self.assertIsInstance(grads, (list, tuple))
@@ -240,7 +240,7 @@ class TestContractExecutorJAX(unittest.TestCase):
     def test_contract_with_qctn_for_gradient(self):
         """Test contraction with QCTN and gradient computation."""
         target_qctn = QCTN(self.graph_string)
-        loss, grads = self.executor.contract_with_qctn_for_gradient(
+        loss, grads = self.engine.contract_with_qctn_for_gradient(
             self.qctn, target_qctn
         )
         
@@ -251,16 +251,16 @@ class TestContractExecutorJAX(unittest.TestCase):
     def test_expression_caching(self):
         """Test that expressions are cached after first use."""
         # First call
-        result1 = self.executor.contract_core_only(self.qctn)
+        result1 = self.engine.contract_core_only(self.qctn)
         self.assertTrue(hasattr(self.qctn, '_contract_expr_core_only'))
         
         # Second call should use cached expression
-        result2 = self.executor.contract_core_only(self.qctn)
+        result2 = self.engine.contract_core_only(self.qctn)
         self.assertIsNotNone(result2)
 
 
-class TestContractExecutorPyTorch(unittest.TestCase):
-    """Test ContractExecutor with PyTorch backend."""
+class TestEnginePyTorch(unittest.TestCase):
+    """Test Engine with PyTorch backend."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -277,22 +277,22 @@ class TestContractExecutorPyTorch(unittest.TestCase):
                 "-2-A-2-"
             )
             self.qctn = QCTN(self.graph_string)
-            self.executor = ContractExecutor(backend='pytorch')
+            self.engine = Engine(backend='pytorch')
 
     def test_executor_initialization(self):
         """Test executor initialization with PyTorch."""
         if not self.torch_available:
             self.skipTest("PyTorch not installed")
         
-        self.assertIsNotNone(self.executor.backend)
-        self.assertEqual(self.executor.backend.get_backend_name(), 'pytorch')
+        self.assertIsNotNone(self.engine.backend)
+        self.assertEqual(self.engine.backend.get_backend_name(), 'pytorch')
 
     def test_contract_core_only(self):
         """Test core-only contraction with PyTorch."""
         if not self.torch_available:
             self.skipTest("PyTorch not installed")
         
-        result = self.executor.contract_core_only(self.qctn)
+        result = self.engine.contract_core_only(self.qctn)
         self.assertIsNotNone(result)
         self.assertTrue(hasattr(result, 'shape'))
 
@@ -302,7 +302,7 @@ class TestContractExecutorPyTorch(unittest.TestCase):
             self.skipTest("PyTorch not installed")
         
         inputs = np.random.rand(2, 2, 2).astype(np.float32)
-        result = self.executor.contract_with_inputs(self.qctn, inputs)
+        result = self.engine.contract_with_inputs(self.qctn, inputs)
         self.assertIsNotNone(result)
 
     def test_contract_with_self(self):
@@ -310,7 +310,7 @@ class TestContractExecutorPyTorch(unittest.TestCase):
         if not self.torch_available:
             self.skipTest("PyTorch not installed")
         
-        result = self.executor.contract_with_self(self.qctn)
+        result = self.engine.contract_with_self(self.qctn)
         self.assertIsNotNone(result)
 
 
@@ -344,11 +344,11 @@ class TestBackendComparison(unittest.TestCase):
             qctn_pytorch.cores_weights[core] = qctn_jax.cores_weights[core].copy()
         
         # Execute with both backends
-        jax_executor = ContractExecutor(backend='jax')
-        pytorch_executor = ContractExecutor(backend='pytorch')
+        jax_engine = Engine(backend='jax')
+        pytorch_engine = Engine(backend='pytorch')
         
-        jax_result = jax_executor.contract_core_only(qctn_jax)
-        pytorch_result = pytorch_executor.contract_core_only(qctn_pytorch)
+        jax_result = jax_engine.contract_core_only(qctn_jax)
+        pytorch_result = pytorch_engine.contract_core_only(qctn_pytorch)
         
         # Convert to numpy for comparison
         jax_result_np = np.array(jax_result)
@@ -379,11 +379,11 @@ class TestBackendComparison(unittest.TestCase):
         inputs = np.random.rand(2, 2).astype(np.float32)
         
         # Execute with both backends
-        jax_executor = ContractExecutor(backend='jax')
-        pytorch_executor = ContractExecutor(backend='pytorch')
+        jax_engine = Engine(backend='jax')
+        pytorch_engine = Engine(backend='pytorch')
         
-        jax_result = jax_executor.contract_with_inputs(qctn_jax, inputs)
-        pytorch_result = pytorch_executor.contract_with_inputs(qctn_pytorch, inputs)
+        jax_result = jax_engine.contract_with_inputs(qctn_jax, inputs)
+        pytorch_result = pytorch_engine.contract_with_inputs(qctn_pytorch, inputs)
         
         # Convert to numpy for comparison
         jax_result_np = np.array(jax_result)
@@ -398,43 +398,43 @@ class TestBackendComparison(unittest.TestCase):
         )
 
 
-class TestExecutorDefaultBackend(unittest.TestCase):
-    """Test ContractExecutor with default backend."""
+class TestEngineDefaultBackend(unittest.TestCase):
+    """Test Engine with default backend."""
 
     def test_default_backend_is_jax(self):
         """Test that default backend is JAX."""
-        executor = ContractExecutor()
-        self.assertEqual(executor.backend.get_backend_name(), 'jax')
+        engine = Engine()
+        self.assertEqual(engine.backend.get_backend_name(), 'jax')
 
     def test_contract_with_default_backend(self):
         """Test contraction with default backend."""
         graph_string = "-2-A-2-\n-2-A-2-"
         qctn = QCTN(graph_string)
         
-        executor = ContractExecutor()
-        result = executor.contract_core_only(qctn)
+        engine = Engine()
+        result = engine.contract_core_only(qctn)
         
         self.assertIsNotNone(result)
         self.assertTrue(hasattr(result, 'shape'))
 
 
-class TestExecutorMultipleQCTN(unittest.TestCase):
-    """Test executor with multiple QCTN instances."""
+class TestEngineMultipleQCTN(unittest.TestCase):
+    """Test engine with multiple QCTN instances."""
 
     def setUp(self):
         """Set up test fixtures."""
-        self.executor = ContractExecutor(backend='jax')
+        self.engine = Engine(backend='jax')
 
     def test_different_qctn_structures(self):
-        """Test executor with different QCTN structures."""
+        """Test engine with different QCTN structures."""
         graph1 = "-2-A-2-\n-2-A-2-"
         graph2 = "-2-B-3-C-2-\n-2-B-2-C-2-"
         
         qctn1 = QCTN(graph1)
         qctn2 = QCTN(graph2)
         
-        result1 = self.executor.contract_core_only(qctn1)
-        result2 = self.executor.contract_core_only(qctn2)
+        result1 = self.engine.contract_core_only(qctn1)
+        result2 = self.engine.contract_core_only(qctn2)
         
         self.assertIsNotNone(result1)
         self.assertIsNotNone(result2)
@@ -448,9 +448,9 @@ class TestExecutorMultipleQCTN(unittest.TestCase):
         qctn = QCTN(graph_string)
         
         # Multiple contractions
-        result1 = self.executor.contract_core_only(qctn)
-        result2 = self.executor.contract_core_only(qctn)
-        result3 = self.executor.contract_core_only(qctn)
+        result1 = self.engine.contract_core_only(qctn)
+        result2 = self.engine.contract_core_only(qctn)
+        result3 = self.engine.contract_core_only(qctn)
         
         # All results should be equal (deterministic)
         np.testing.assert_array_equal(np.array(result1), np.array(result2))

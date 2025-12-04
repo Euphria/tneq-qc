@@ -1,5 +1,5 @@
 """
-Unified executor that combines contractor (expression generation) with backend (execution).
+Unified engine that combines contractor (expression generation) with backend (execution).
 
 This module provides high-level functions that use EinsumStrategy to generate
 expressions and then execute them using the specified backend.
@@ -16,9 +16,9 @@ from ..contractor import EinsumStrategy, StrategyCompiler
 from ..backends.backend_factory import BackendFactory, ComputeBackend
 
 
-class ContractExecutor:
+class Engine:
     """
-    Executor that combines tensor contraction expression generation with backend execution.
+    Engine that combines tensor contraction expression generation with backend execution.
     
     This class separates concerns:
     - EinsumStrategy: Generates einsum expressions using opt_einsum (legacy)
@@ -28,7 +28,7 @@ class ContractExecutor:
 
     def __init__(self, backend: Optional[Union[str, ComputeBackend]] = None, strategy_mode: str = 'balanced'):
         """
-        Initialize the executor with a specific backend and strategy mode.
+        Initialize the engine with a specific backend and strategy mode.
         
         Args:
             backend (str or ComputeBackend, optional): Backend to use. 
@@ -109,12 +109,12 @@ class ContractExecutor:
                 'strategy_name': strategy_name,
                 'cost': cost
             })
-            print(f"[Executor] Compiled and cached strategy: {strategy_name}")
+            print(f"[Engine] Compiled and cached strategy: {strategy_name}")
         else:
             cached = getattr(qctn, cache_key)
             compute_fn = cached['compute_fn']
             strategy_name = cached['strategy_name']
-            print(f"[Executor] Using cached strategy: {strategy_name}")
+            print(f"[Engine] Using cached strategy: {strategy_name}")
         
         # Prepare data
         cores_dict = {name: self.backend.convert_to_tensor(qctn.cores_weights[name]) for name in qctn.cores}
@@ -182,12 +182,12 @@ class ContractExecutor:
                 'strategy_name': strategy_name,
                 'cost': cost
             })
-            print(f"[Executor] Compiled and cached strategy: {strategy_name}")
+            print(f"[Engine] Compiled and cached strategy: {strategy_name}")
         else:
             cached = getattr(qctn, cache_key)
             compute_fn = cached['compute_fn']
             strategy_name = cached['strategy_name']
-            # print(f"[Executor] Using cached strategy: {strategy_name}")
+            # print(f"[Engine] Using cached strategy: {strategy_name}")
             
         # Define loss function
         def loss_fn(*core_tensors):

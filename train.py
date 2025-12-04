@@ -3,7 +3,7 @@ from tneq_qc.config import Configuration
 from tneq_qc.core.qctn import QCTN, QCTNHelper
 from tneq_qc.core.cqctn import ContractorQCTN
 from tneq_qc.backends.copteinsum import ContractorOptEinsum
-from tneq_qc.core.executor import ContractExecutor
+from tneq_qc.core.engine import Engine
 from tneq_qc.optim.optimizer import Optimizer
 import numpy as np
 import torch
@@ -119,11 +119,11 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
-    executor = ContractExecutor(backend=backend_type, strategy_mode="balanced")
+    engine = Engine(backend=backend_type, strategy_mode="balanced")
 
     qctn_graph = QCTNHelper.generate_example_graph()
     print(f"qctn_graph: \n{qctn_graph}")
-    qctn = QCTN(qctn_graph, backend=executor.backend)
+    qctn = QCTN(qctn_graph, backend=engine.backend)
 
     N = 20
     B = 512
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     # ) as prof:
     #     for step in range(100):
     #         with torch.no_grad():
-    #             result = executor.contract_with_self(qctn, 
+    #             result = engine.contract_with_self(qctn, 
     #                                                 circuit_states=circuit_states_list,
     #                                                 measure_input=data_list[0]["measure_input_list"], 
     #                                                 measure_is_matrix=True,
@@ -196,7 +196,7 @@ if __name__ == "__main__":
     # ) as prof:
     #     for step in range(10):
     #         with torch.no_grad():
-    #             result = executor.contract_with_std_graph(qctn,
+    #             result = engine.contract_with_std_graph(qctn,
     #                                                     circuit_states_list=circuit_states_list,
     #                                                     measure_input_list=data_list[0]["measure_input_list"],
     #                                                     )
@@ -205,7 +205,7 @@ if __name__ == "__main__":
 
     # torch.cuda.empty_cache()
     # with torch.no_grad():
-    #     result = executor.contract_with_self(qctn, 
+    #     result = engine.contract_with_self(qctn, 
     #                                         circuit_states=circuit_states_list,
     #                                         measure_input=data_list[0]["measure_input_list"], 
     #                                         measure_is_matrix=True,
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     # torch.cuda.empty_cache()
     # with torch.no_grad():
     #     # for i in range(10):
-    #     result = executor.contract_with_std_graph(qctn,
+    #     result = engine.contract_with_std_graph(qctn,
     #                                             circuit_states_list=circuit_states_list,
     #                                             measure_input_list=data_list[0]["measure_input_list"],
     #                                             )
@@ -252,7 +252,7 @@ if __name__ == "__main__":
         beta1=0.9, 
         beta2=0.95, 
         epsilon=1e-8,
-        executor=executor,
+        engine=engine,
         lr_schedule=lr_schedule,
 
         momentum=0.9,            # 动量因子
@@ -281,7 +281,7 @@ if __name__ == "__main__":
     test_loss_list = []
     for i in range(N):
         data_slice = [x[0:1] for x in data_list[i]["measure_input_list"]]
-        result = executor.contract_with_std_graph(qctn, 
+        result = engine.contract_with_std_graph(qctn, 
                                                 circuit_states_list=circuit_states_list,
                                                 measure_input_list=data_slice, 
                                                 )
@@ -298,9 +298,9 @@ if __name__ == "__main__":
     qctn.save_cores(cores_file, metadata={"graph": "example"})
 
     # load pretrained qctn
-    pretrained_qctn = QCTN.from_pretrained(qctn_graph, cores_file, backend=executor.backend)
+    pretrained_qctn = QCTN.from_pretrained(qctn_graph, cores_file, backend=engine.backend)
     with torch.no_grad():
-        pretrained_result = executor.contract_with_std_graph(
+        pretrained_result = engine.contract_with_std_graph(
             pretrained_qctn,
             circuit_states_list=circuit_states_list,
             measure_input_list=data_list[0]["measure_input_list"],
