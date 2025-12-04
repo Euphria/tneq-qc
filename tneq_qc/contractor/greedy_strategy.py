@@ -376,7 +376,46 @@ class GreedyStrategy(ContractionStrategy):
                 
                 if not entries_on_qubit:
                     continue
+
+                # print(f'entries_on_qubit \n{entries_on_qubit}')
+
+                # 遍历所有entries_on_qubit，如果circuit_state是某个core入边或出边，则把这个circuit_state也加进来
+                # 在这里，neighbor_idx已经没办法直接和core_tensor_list对上了，所以需要再遍历一遍core_tensor_list来找
+                additional_entries = []
+                for entry in entries_on_qubit:
+                    # Check in_edges
+                    for edge in entry['in_edge_list']:
+                        neighbor_idx = edge['neighbor_idx']
+                        if neighbor_idx >= 0:
+                            # Find neighbor entry by core_idx
+                            neighbor_entry = None
+                            for cand in core_tensor_list:
+                                if cand['core_idx'] == neighbor_idx:
+                                    neighbor_entry = cand
+                                    break
+                            
+                            if neighbor_entry and neighbor_entry['tensor_source'] == 'circuit' and \
+                                 neighbor_entry not in entries_on_qubit and \
+                                    neighbor_entry not in additional_entries:
+                                additional_entries.append(neighbor_entry)
+                    # Check out_edges
+                    for edge in entry['out_edge_list']:
+                        neighbor_idx = edge['neighbor_idx']
+                        if neighbor_idx >= 0:
+                            # Find neighbor entry by core_idx
+                            neighbor_entry = None
+                            for cand in core_tensor_list:
+                                if cand['core_idx'] == neighbor_idx:
+                                    neighbor_entry = cand
+                                    break
+                            
+                            if neighbor_entry and neighbor_entry['tensor_source'] == 'circuit' and \
+                                 neighbor_entry not in entries_on_qubit and \
+                                    neighbor_entry not in additional_entries:
+                                additional_entries.append(neighbor_entry)
                 
+                entries_on_qubit.extend(additional_entries)
+
                 # Find connected groups
                 groups = _find_connected_groups_symmetric(entries_on_qubit, qubit_idx)
                 
@@ -573,8 +612,8 @@ def _contract_symmetric_group(
         if not has_qubit_edge:
             return entry
     
-    print(f"\n  _contract_symmetric_group at qubit {qubit_idx}")
-    print(f"  Group members: {[e['core_name'] for e in group]}")
+    # print(f"\n  _contract_symmetric_group at qubit {qubit_idx}")
+    # print(f"  Group members: {[e['core_name'] for e in group]}")
     
     # ========================================
     # Build einsum expression
@@ -696,13 +735,34 @@ def _contract_symmetric_group(
     # Build einsum equation
     einsum_eq = ",".join(einsum_parts) + "->" + "".join(output_symbols)
     
-    print(f"  Einsum equation: {einsum_eq}")
-    print(f"  Tensor shapes: {[t.shape for t in tensor_list]}")
+    # mapping symbol to standard einsum symbols
+    def remap_symbols(einsum_eq: str) -> str:
+        import opt_einsum
+        symbol_map = {
+            'a': 'a',
+            'b': 'b',
+            ',': ',',
+            '-': '-',
+            '>': '>',
+        }
+
+        idx = 2
+        for i, c in enumerate(einsum_eq):
+            if c not in symbol_map:
+                symbol_map[c] = opt_einsum.get_symbol(idx)
+                idx += 1
+        remapped = "".join(symbol_map.get(c, c) for c in einsum_eq)
+        return remapped
+
+    einsum_eq = remap_symbols(einsum_eq)
+
+    # print(f"  Einsum equation: {einsum_eq}")
+    # print(f"  Tensor shapes: {[t.shape for t in tensor_list]}")
     
     # Execute contraction
     result_tensor = torch.einsum(einsum_eq, *tensor_list)
     
-    print(f"  Result shape: {result_tensor.shape}")
+    # print(f"  Result shape: {result_tensor.shape}")
     
     # Build remaining edges
     remaining_in_edges = [edge for _, edge in collected_in_edges]
@@ -812,7 +872,7 @@ def _contract_remaining(core_tensor_list: List[Dict], backend, cores_dict, circu
 
     einsum_eq = ",".join(parts) + "->" + "".join(output_symbols)
     
-    print(f"[Greedy] Final contraction")
-    print(f"  Einsum: {einsum_eq}")
+    # print(f"[Greedy] Final contraction")
+    # print(f"  Einsum: {einsum_eq}")
     
     return torch.einsum(einsum_eq, *tensors)

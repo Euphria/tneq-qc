@@ -275,6 +275,8 @@ if __name__ == "__main__":
     print(f"缓存显存: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
     print(f"Optimization Time: {toc - tic:.2f} seconds")
 
+    exit()
+
     # Choose the first data of each batch for testing
     test_loss_list = []
     for i in range(N):
