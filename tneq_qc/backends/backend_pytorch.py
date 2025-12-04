@@ -356,3 +356,9 @@ class BackendPyTorch(ComputeBackend):
     def reshape(self, tensor, shape):
         """Reshape tensor to the given shape."""
         return tensor.reshape(shape)
+
+    def eye(self, n: int, dtype=None):
+        """Create an identity matrix of size n x n."""
+        if dtype is None:
+            dtype = self.torch.float32
+        return self.torch.eye(n, dtype=dtype, device=self.backend_info.device)

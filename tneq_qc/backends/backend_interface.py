@@ -212,3 +212,17 @@ class ComputeBackend(ABC):
             Reshaped tensor.
         """
         pass
+
+    @abstractmethod
+    def eye(self, n: int, dtype=None):
+        """
+        Create an identity matrix of size n x n.
+        
+        Args:
+            n: Size of the matrix.
+            dtype: Data type of the matrix.
+            
+        Returns:
+            Identity matrix tensor.
+        """
+        pass

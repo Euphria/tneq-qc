@@ -66,7 +66,7 @@ class QCTNHelper:
                     graph += line + "\n"
                 return graph
 
-            # return generate_std_graph(10)
+            return generate_std_graph(3)
         
             # return  "-3-A-3-"
             # return  "-3-A-3-B-3-C-3-D-3-"

@@ -101,6 +101,57 @@ def generate_Mx_phi_x_uniform(num_batch, batch_size, num_qubits, K, edge_size):
         data_list += [(Mx_list, out)]
     return data_list
 
+def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
+    """
+    Generate Mx and phi_x data
+    Parameters:
+    - num_batch: Number of batches to generate
+    - batch_size: Size of each batch
+    - num_qubits: Number of qubits (dimension D)
+    - K: Number of Hermite polynomials to evaluate
+    Returns:
+    - data_list: List of tuples (Mx, phi_x) for each batch
+    """
+
+    data_list = []
+
+    weights = init_normalization_factors_vectorized()
+    weights = weights[None, None, :K]
+
+    for i in range(num_batch):
+        
+        # x变成-5到5的高斯分布
+        # x = torch.empty((batch_size, num_qubits), device='cuda').trunc_normal_(mean=0.0, std=1.0, a=-5.0, b=5.0)
+        x = torch.empty((batch_size, num_qubits), device='cuda').normal_(mean=0.0, std=1.0)
+        
+        # print('x', x, x.shape)
+        
+        out = eval_hermitenorm_batch(K - 1, x)  # shape = (K, B, D)
+        
+        # print('out', out.shape)
+
+        out.transpose_(0, 1).transpose_(1, 2)  # shape = (B, D, K)
+
+        # print('out', out, out.shape)
+        # print('x', x, x.shape)
+
+        out = weights * torch.sqrt(torch.exp(- torch.square(x) / 2))[:, :, None] * out
+
+        print(f'phi_x.shape {out.shape}')
+        # out_norm = torch.sum(out * out, dim=-1)
+        # out = out / torch.sqrt(out_norm)[:, :, None]
+
+        # print(f"out after weighting and scaling: {out}, out.shape: {out.shape}")
+        einsum_expr = "abc,abd->abcd"
+        Mx = torch.einsum(einsum_expr,
+                          out, out)
+        # print(f"Mx : {Mx}, Mx.shape: {Mx.shape}")
+        print(f"Mx.shape: {Mx.shape}")
+
+        Mx_list = [Mx[:, i] for i in range(num_qubits)]
+        data_list += [(Mx_list, out)]
+    return data_list
+
 def generate_circuit_states_list(num_qubits, K):
     """
     Generate circuit states list with status [0, 0, ..., 1] for each qubit

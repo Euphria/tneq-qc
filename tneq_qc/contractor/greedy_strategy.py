@@ -612,8 +612,8 @@ def _contract_symmetric_group(
         if not has_qubit_edge:
             return entry
     
-    # print(f"\n  _contract_symmetric_group at qubit {qubit_idx}")
-    # print(f"  Group members: {[e['core_name'] for e in group]}")
+    print(f"\n  _contract_symmetric_group at qubit {qubit_idx}")
+    print(f"  Group members: {[e['core_name'] for e in group]}")
     
     # ========================================
     # Build einsum expression
@@ -756,8 +756,8 @@ def _contract_symmetric_group(
 
     einsum_eq = remap_symbols(einsum_eq)
 
-    # print(f"  Einsum equation: {einsum_eq}")
-    # print(f"  Tensor shapes: {[t.shape for t in tensor_list]}")
+    print(f"  Einsum equation: {einsum_eq}")
+    print(f"  Tensor shapes: {[t.shape for t in tensor_list]}")
     
     # Execute contraction
     result_tensor = torch.einsum(einsum_eq, *tensor_list)
@@ -872,7 +872,7 @@ def _contract_remaining(core_tensor_list: List[Dict], backend, cores_dict, circu
 
     einsum_eq = ",".join(parts) + "->" + "".join(output_symbols)
     
-    # print(f"[Greedy] Final contraction")
-    # print(f"  Einsum: {einsum_eq}")
+    print(f"[Greedy] Final contraction")
+    print(f"  Einsum: {einsum_eq}")
     
     return torch.einsum(einsum_eq, *tensors)

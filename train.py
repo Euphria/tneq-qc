@@ -3,7 +3,8 @@ from tneq_qc.config import Configuration
 from tneq_qc.core.qctn import QCTN, QCTNHelper
 from tneq_qc.core.cqctn import ContractorQCTN
 from tneq_qc.backends.copteinsum import ContractorOptEinsum
-from tneq_qc.core.engine import Engine
+# from tneq_qc.core.engine import Engine
+from tneq_qc.core.engine_siamese import EngineSiamese
 from tneq_qc.optim.optimizer import Optimizer
 import numpy as np
 import torch
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
-    engine = Engine(backend=backend_type, strategy_mode="balanced")
+    engine = EngineSiamese(backend=backend_type, strategy_mode="balanced")
 
     qctn_graph = QCTNHelper.generate_example_graph()
     print(f"qctn_graph: \n{qctn_graph}")
@@ -275,6 +276,10 @@ if __name__ == "__main__":
     print(f"缓存显存: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
     print(f"Optimization Time: {toc - tic:.2f} seconds")
 
+    # save cores
+    cores_file = "./assets/qctn_cores.safetensors"
+    qctn.save_cores(cores_file, metadata={"graph": "example"})
+
     exit()
 
     # Choose the first data of each batch for testing
@@ -292,11 +297,7 @@ if __name__ == "__main__":
     print(f"Max Result: {max(test_loss_list)}")
     print(f"Min Result: {min(test_loss_list)}")
 
-    # save cores
-
-    cores_file = "./assets/qctn_cores.safetensors"
-    qctn.save_cores(cores_file, metadata={"graph": "example"})
-
+    
     # load pretrained qctn
     pretrained_qctn = QCTN.from_pretrained(qctn_graph, cores_file, backend=engine.backend)
     with torch.no_grad():

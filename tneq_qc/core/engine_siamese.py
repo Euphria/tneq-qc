@@ -54,8 +54,7 @@ class EngineSiamese:
     # Strategy-based Compilation Methods (NEW API)
     # ============================================================================
 
-    def contract_with_compiled_strategy(self, qctn, circuit_states=None, measure_input=None, 
-                                       measure_is_matrix=True, force_recompile: bool = False):
+    def contract_with_compiled_strategy(self, qctn, circuit_states_list, measure_input_list, measure_is_matrix=True):
         """
         Contract using compiled strategy (auto-selected based on mode).
         
@@ -66,30 +65,19 @@ class EngineSiamese:
             circuit_states (array or list, optional): Circuit input states.
             measure_input (array or list, optional): Measurement input.
             measure_is_matrix (bool): If True, measure_input is the outer product matrix.
-            force_recompile (bool): Force recompilation even if cached.
         
         Returns:
             Backend tensor: Result of the contraction.
         """
-        # Prepare shapes_info
-        states_shape = None
-        if circuit_states is not None:
-            if isinstance(circuit_states, list):
-                circuit_states = [self.backend.convert_to_tensor(s) for s in circuit_states]
-                states_shape = tuple([s.shape for s in circuit_states])
-            else:
-                circuit_states = self.backend.convert_to_tensor(circuit_states)
-                states_shape = circuit_states.shape
-        
-        measure_shape = None
-        if measure_input is not None:
-            if isinstance(measure_input, list):
-                measure_input = [self.backend.convert_to_tensor(m) for m in measure_input]
-                measure_shape = tuple([m.shape for m in measure_input])
-            else:
-                measure_input = self.backend.convert_to_tensor(measure_input)
-                measure_shape = measure_input.shape
-        
+
+        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
+        circuit_states = circuit_states_list
+        states_shape = tuple([s.shape for s in circuit_states_list])
+
+        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
+        measure_shape = tuple([m.shape for m in measure_input_list])
+        measure_input = measure_input_list
+
         shapes_info = {
             'circuit_states_shapes': states_shape,
             'measure_shapes': measure_shape,
@@ -99,7 +87,7 @@ class EngineSiamese:
         # Check cache
         cache_key = f'_compiled_strategy_{self.strategy_mode}_{states_shape}_{measure_shape}_{measure_is_matrix}'
         
-        if force_recompile or not hasattr(qctn, cache_key):
+        if not hasattr(qctn, cache_key):
             # Compile strategy
             compute_fn, strategy_name, cost = self.strategy_compiler.compile(qctn, shapes_info, self.backend)
             
@@ -124,8 +112,7 @@ class EngineSiamese:
         
         return result
 
-    def contract_with_compiled_strategy_for_gradient(self, qctn, circuit_states_list=None, measure_input_list=None, 
-                                                    measure_is_matrix=True, force_recompile: bool = False) -> Tuple:
+    def contract_with_compiled_strategy_for_gradient(self, qctn, circuit_states_list, measure_input_list, measure_is_matrix=True) -> Tuple:
         """
         Contract using compiled strategy and compute gradients.
         
@@ -136,32 +123,18 @@ class EngineSiamese:
             circuit_states_list (array or list, optional): Circuit input states.
             measure_input_list (array or list, optional): Measurement input.
             measure_is_matrix (bool): If True, measure_input is the outer product matrix.
-            force_recompile (bool): Force recompilation even if cached.
         
         Returns:
             tuple: (loss, gradients)
         """
-        circuit_states = circuit_states_list
-        measure_input = measure_input_list
 
-        # Prepare shapes_info
-        states_shape = None
-        if circuit_states is not None:
-            if isinstance(circuit_states, list):
-                circuit_states = [self.backend.convert_to_tensor(s) for s in circuit_states]
-                states_shape = tuple([s.shape for s in circuit_states])
-            else:
-                circuit_states = self.backend.convert_to_tensor(circuit_states)
-                states_shape = circuit_states.shape
-        
-        measure_shape = None
-        if measure_input is not None:
-            if isinstance(measure_input, list):
-                measure_input = [self.backend.convert_to_tensor(m) for m in measure_input]
-                measure_shape = tuple([m.shape for m in measure_input])
-            else:
-                measure_input = self.backend.convert_to_tensor(measure_input)
-                measure_shape = measure_input.shape
+        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
+        circuit_states = circuit_states_list
+        states_shape = tuple([s.shape for s in circuit_states_list])
+
+        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
+        measure_shape = tuple([m.shape for m in measure_input_list])
+        measure_input = measure_input_list
         
         shapes_info = {
             'circuit_states_shapes': states_shape,
@@ -172,7 +145,7 @@ class EngineSiamese:
         # Check cache
         cache_key = f'_compiled_strategy_{self.strategy_mode}_{states_shape}_{measure_shape}_{measure_is_matrix}'
         
-        if force_recompile or not hasattr(qctn, cache_key):
+        if not hasattr(qctn, cache_key):
             # Compile strategy
             compute_fn, strategy_name, cost = self.strategy_compiler.compile(qctn, shapes_info, self.backend)
             
@@ -220,3 +193,167 @@ class EngineSiamese:
         loss, grads = value_and_grad_fn(*core_tensors)
         
         return loss, grads
+
+    # ============================================================================
+    # Probability Calculation Methods
+    # ============================================================================
+
+    def calculate_full_probability(self, qctn, circuit_states_list, measure_input_list):
+        """
+        Calculate the full probability of observing a specific bitstring.
+        
+        Args:
+            qctn (QCTN): The quantum circuit tensor network.
+            circuit_states_list (list): List of circuit input states.
+            measure_input_list (list): List of measurement input matrices (complete).
+            
+        Returns:
+            Backend tensor: The calculated probability.
+        """
+
+        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
+        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
+
+        return self.contract_with_compiled_strategy(
+            qctn, 
+            circuit_states_list=circuit_states_list, 
+            measure_input_list=measure_input_list, 
+            measure_is_matrix=True
+        )
+
+    def calculate_marginal_probability(self, qctn, circuit_states_list, measure_input_list, qubit_indices: List[int]):
+        """
+        Calculate the marginal probability of a subset of qubits being in a specific state.
+        
+        Args:
+            qctn (QCTN): The quantum circuit tensor network.
+            circuit_states_list (list): List of circuit input states.
+            measure_input_list (list): List of measurement input matrices (partial).
+            qubit_indices (list[int]): Indices of qubits corresponding to measure_input_list.
+            
+        Returns:
+            Backend tensor: The calculated probability (or batch of probabilities).
+        """
+
+        if len(qubit_indices) != len(measure_input_list):
+            raise ValueError("Length of qubit_indices must match length of measure_input_list")
+            
+        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
+        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
+
+        dim = measure_input_list[0].shape[-1]
+
+        full_measure_input_list = []
+        
+        # Create Identity matrix
+        ident = self.backend.eye(dim)
+        # If measure_input_list has batch dim, ident should broadcast or match?
+        # Usually measure_input_list elements are (B, K, K) or (K, K).
+        # We assume (B, K, K) or compatible.
+        # If we need batch dim for identity, we can add it later or rely on broadcasting.
+        # But contract_with_compiled_strategy expects consistent batch dims if present.
+        # Let's check the first element of measure_input_list to see if it has batch dim.
+        has_batch = False
+        batch_size = 1
+        if len(measure_input_list) > 0:
+            if measure_input_list[0].ndim == 3:
+                has_batch = True
+                batch_size = measure_input_list[0].shape[0]
+                ident = ident.unsqueeze(0).expand(batch_size, -1, -1)
+
+        for i in range(qctn.nqubits):
+            if i in qubit_indices:
+                idx = qubit_indices.index(i)
+                full_measure_input_list.append(measure_input_list[idx])
+            else:
+                full_measure_input_list.append(ident)
+        
+        return self.contract_with_compiled_strategy(
+            qctn, 
+            circuit_states_list=circuit_states_list, 
+            measure_input_list=full_measure_input_list, 
+            measure_is_matrix=True
+        )
+
+    def calculate_conditional_probability(self, qctn, circuit_states_list, measure_input_list, 
+                                          qubit_indices: List[int], target_indices: List[int]):
+        """
+        Calculate the conditional probability P(target | condition).
+        
+        Args:
+            qctn (QCTN): The quantum circuit tensor network.
+            circuit_states_list (list): List of circuit input states.
+            measure_input_list (list): List of measurement input matrices (covering target + condition).
+            qubit_indices (list[int]): Indices of qubits corresponding to measure_input_list.
+            target_indices (list[int]): Indices of target qubits (subset of qubit_indices).
+            
+        Returns:
+            Backend tensor: The calculated conditional probability.
+        """
+        # Check inputs
+        if len(qubit_indices) != len(measure_input_list):
+            raise ValueError("Length of qubit_indices must match length of measure_input_list")
+        
+        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
+        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
+
+        dim = measure_input_list[0].shape[-1]
+        # Create Identity matrix (B, K, K)
+        ident = self.backend.eye(dim)
+
+        has_batch = False
+        batch_size = 1
+        if len(measure_input_list) > 0:
+            if measure_input_list[0].ndim == 3:
+                has_batch = True
+                batch_size = measure_input_list[0].shape[0]
+                ident = ident.unsqueeze(0).expand(batch_size, -1, -1)
+
+        # Prepare stacked measurements
+        # We want output shape (B, 2) -> effectively batch size 2*B? Or B*2?
+        # The user requested: "change shape to B*2*K*K".
+        # Index 0: Original (Joint P(A,B))
+        # Index 1: Identity on Target (Marginal P(B))
+        
+        full_measure_input_list = []
+        
+        for i in range(qctn.nqubits):
+            # Prepare tensor of shape (B, 2, K, K)
+            
+            if i in qubit_indices:
+                idx = qubit_indices.index(i)
+                measure_tensor = measure_input_list[idx] # (B, K, K)
+                
+                if i in target_indices:
+                    # Target qubit: [Measure, Identity]
+                    # Stack along dim 1
+                    stacked = torch.stack([measure_tensor, ident], dim=1) # (B, 2, K, K)
+                else:
+                    # Condition qubit: [Measure, Measure]
+                    stacked = torch.stack([measure_tensor, measure_tensor], dim=1) # (B, 2, K, K)
+            else:
+                # Unused qubit: [Identity, Identity]
+                stacked = torch.stack([ident, ident], dim=1) # (B, 2, K, K)
+            
+            full_measure_input_list.append(stacked)
+        
+        # Contract
+        # The engine's einsum strategy should handle the extra dimension '2' via broadcasting '...'
+        # Result shape should be (B, 2)
+        result = self.contract_with_compiled_strategy(
+            qctn, 
+            circuit_states_list=circuit_states_list, 
+            measure_input_list=full_measure_input_list, 
+            measure_is_matrix=True
+        )
+        
+        # Calculate conditional probability
+        # result[:, 0] is Joint P(A, B)
+        # result[:, 1] is Marginal P(B)
+        # P(A|B) = P(A, B) / P(B)
+        
+        prob_joint = result[:, 0]
+        prob_condition = result[:, 1]
+        
+        epsilon = 1e-10
+        return prob_joint / (prob_condition + epsilon)

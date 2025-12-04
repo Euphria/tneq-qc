@@ -159,3 +159,18 @@ class BackendJAX(ComputeBackend):
     def reshape(self, tensor, shape):
         """Reshape tensor to the given shape."""
         return self.jnp.reshape(tensor, shape)
+
+    def eye(self, n: int, dtype=None):
+        """Create an identity matrix of size n x n."""
+        if dtype is None:
+            dtype = self.jnp.float32
+        
+        tensor = self.jnp.eye(n, dtype=dtype)
+        
+        # Device placement if GPU
+        if self.backend_info.device and 'gpu' in self.backend_info.device.lower():
+            devices = self.jax.devices('gpu')
+            if devices:
+                tensor = self.jax.device_put(tensor, devices[0])
+                
+        return tensor
