@@ -66,8 +66,8 @@ def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
     for i in range(num_batch):
         
         # x变成-5到5的高斯分布
-        # x = torch.empty((batch_size, num_qubits), device='cuda').trunc_normal_(mean=0.0, std=1.0, a=-5.0, b=5.0)
-        x = torch.empty((batch_size, num_qubits), device='cuda').normal_(mean=0.0, std=1.0)
+        # x = torch.empty((batch_size, num_qubits), device='cuda').uniform_(-5.0, 5.0)
+        x = torch.empty((batch_size, num_qubits), device='cuda').normal_(mean=2.5, std=1.0)
         
         # print('x', x, x.shape)
         
@@ -128,8 +128,8 @@ if __name__ == "__main__":
     # print(f"qctn_graph: \n{qctn_graph}")
     qctn = QCTN(qctn_graph, backend=engine.backend)
 
-    N = 1
-    B = 4096 * 16
+    N = 100
+    B = 128
     D = qctn.nqubits
     K = 3
 

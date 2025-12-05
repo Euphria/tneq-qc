@@ -126,10 +126,15 @@ class GreedyStrategy(ContractionStrategy):
             
             for qubit_idx in range(nqubits):
                 if measure_matrices is not None and qubit_idx < len(measure_matrices):
-                    uid = get_uid()
-                    mx_map[qubit_idx] = uid
                     
                     mx = measure_matrices[qubit_idx]
+
+                    if mx is None:
+                        continue
+                    
+                    uid = get_uid()
+                    mx_map[qubit_idx] = uid
+
                     # Mx shape: (B, d, d) or (B, 2, d, d)
                     batch_sym = ""
                     if mx.ndim == 3:
@@ -347,6 +352,16 @@ class GreedyStrategy(ContractionStrategy):
                                 in_edge['symbol'] = sym
                                 break
 
+            # process remaining in_edges that might not have been assigned
+            for entry in core_tensor_list:
+                # Assign symbols to out_edges and propagate to neighbor's in_edges
+                for edge in entry['in_edge_list']:
+                    if 'symbol' in edge:
+                        continue
+                    
+                    sym = next(symbol_gen)
+                    edge['symbol'] = sym
+
             # print(f'core_tensor_list :\n{core_tensor_list}')
             # print(f'left_core_map :\n{left_core_map}')
             # print(f'right_core_map :\n{right_core_map}')
@@ -419,11 +434,11 @@ class GreedyStrategy(ContractionStrategy):
                 # Find connected groups
                 groups = _find_connected_groups_symmetric(entries_on_qubit, qubit_idx)
                 
-                if len(groups) > 1:
-                    raise NotImplementedError(
-                        f"Multiple disconnected groups ({len(groups)}) found at qubit {qubit_idx}. "
-                        "Currently only single connected group is supported."
-                    )
+                # if len(groups) > 1:
+                #     raise NotImplementedError(
+                #         f"Multiple disconnected groups ({len(groups)}) found at qubit {qubit_idx}. "
+                #         "Currently only single connected group is supported."
+                #     )
                 
                 # Contract groups and collect updates
                 new_entries = []
@@ -630,6 +645,9 @@ def _contract_symmetric_group(
     batch_symbols = set()
     
     for entry in group:
+        
+        # print(f"Processing entry: {entry['core_name']}")
+
         core_idx = entry['core_idx']
         tensor = _get_tensor(entry, cores_dict, circuit_states, measure_matrices)
         side = entry['side']
@@ -658,6 +676,9 @@ def _contract_symmetric_group(
             # out_edge_list (was original in_edges, reversed)
             # out_edge_list[i] <-> tensor dim (original_in_count - 1 - i)
             for edge_list_idx, edge in enumerate(entry['out_edge_list']):
+                
+                # print(f"  RIGHT out_edge_list idx {edge_list_idx}, edge: {edge}")
+                
                 symbol = edge['symbol']
                 tensor_dim = original_in_count - 1 - edge_list_idx
                 dim_symbols[tensor_dim] = symbol
@@ -667,12 +688,17 @@ def _contract_symmetric_group(
                 is_internal = neighbor_idx >= 0 and neighbor_idx in group_indices
                 is_on_current_qubit = edge['qubit_idx'] == qubit_idx
                 
-                if not is_internal and not is_on_current_qubit:
+                empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                
+                if empty_edge or not is_internal and not is_on_current_qubit:
                     collected_out_edges.append((symbol, edge.copy()))
             
             # in_edge_list (was original out_edges, reversed)
             # in_edge_list[i] <-> tensor dim (original_in_count + original_out_count - 1 - i)
             for edge_list_idx, edge in enumerate(entry['in_edge_list']):
+
+                # print(f"  RIGHT in_edge_list idx {edge_list_idx}, edge: {edge}")
+
                 symbol = edge['symbol']
                 tensor_dim = original_in_count + original_out_count - 1 - edge_list_idx
                 dim_symbols[tensor_dim] = symbol
@@ -681,7 +707,9 @@ def _contract_symmetric_group(
                 is_internal = neighbor_idx >= 0 and neighbor_idx in group_indices
                 is_on_current_qubit = edge['qubit_idx'] == qubit_idx
                 
-                if not is_internal and not is_on_current_qubit:
+                empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                
+                if empty_edge or not is_internal and not is_on_current_qubit:
                     collected_in_edges.append((symbol, edge.copy()))
             
             part += "".join(s for s in dim_symbols if s is not None)
@@ -699,8 +727,10 @@ def _contract_symmetric_group(
                 neighbor_idx = edge['neighbor_idx']
                 is_internal = neighbor_idx >= 0 and neighbor_idx in group_indices
                 is_on_current_qubit = edge['qubit_idx'] == qubit_idx
+
+                empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
                 
-                if not is_internal and not is_on_current_qubit:
+                if empty_edge or not is_internal and not is_on_current_qubit:
                     collected_in_edges.append((symbol, edge.copy()))
             
             # Out edges
@@ -711,8 +741,10 @@ def _contract_symmetric_group(
                 neighbor_idx = edge['neighbor_idx']
                 is_internal = neighbor_idx >= 0 and neighbor_idx in group_indices
                 is_on_current_qubit = edge['qubit_idx'] == qubit_idx
+
+                empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
                 
-                if not is_internal and not is_on_current_qubit:
+                if empty_edge or not is_internal and not is_on_current_qubit:
                     collected_out_edges.append((symbol, edge.copy()))
             
             einsum_parts.append(part)

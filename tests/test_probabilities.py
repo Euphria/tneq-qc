@@ -1,4 +1,3 @@
-
 import torch
 import numpy as np
 import math
@@ -101,6 +100,8 @@ def test_probabilities():
     state_0_batch = state_0.unsqueeze(0).expand(batch_size, -1) # (B, 2)
     circuit_states = [state_0_batch, state_0_batch]
     
+    circuit_states = [engine.backend.convert_to_tensor(s) for s in circuit_states]
+
     # Create Projectors
     # |0><0|
     proj_0 = torch.tensor([[1.0, 0.0], [0.0, 0.0]], dtype=torch.float32)
@@ -108,21 +109,31 @@ def test_probabilities():
     
     # 1. Test Full Probability P(00)
     measure_list_full = [proj_0_batch, proj_0_batch]
+
+    measure_list_full = [engine.backend.convert_to_tensor(m) for m in measure_list_full]
+
     prob_00 = engine.calculate_full_probability(qctn, circuit_states, measure_list_full)
     print(f"P(00) shape: {prob_00.shape}")
     print(f"P(00): {prob_00[0]}")
     
     # 2. Test Marginal Probability P(q0=0)
     measure_list_marginal = [proj_0_batch]
+
+    measure_list_marginal = [engine.backend.convert_to_tensor(m) for m in measure_list_marginal]
+
     prob_q0_0 = engine.calculate_marginal_probability(qctn, circuit_states, measure_list_marginal, [0])
     print(f"P(q0=0) shape: {prob_q0_0.shape}")
     print(f"P(q0=0): {prob_q0_0[0]}")
     
+    measure_list_conditional = [proj_0_batch, proj_0_batch]
+
+    measure_list_conditional = [engine.backend.convert_to_tensor(m) for m in measure_list_conditional]
+
     # 3. Test Conditional Probability P(q1=0 | q0=0)
     cond_prob = engine.calculate_conditional_probability(
         qctn, 
         circuit_states, 
-        measure_input_list=[proj_0_batch, proj_0_batch], 
+        measure_input_list=measure_list_conditional, 
         qubit_indices=[0, 1], 
         target_indices=[1]
     )
@@ -136,13 +147,12 @@ def test_probabilities():
     assert torch.allclose(cond_prob, expected, atol=1e-5)
     print("Conditional probability test passed!")
 
-def test_random_probabilities():
+def test_random_probabilities(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors"):
     print("\n=== Test 1: Random Probabilities ===")
     backend_type = 'pytorch'
     engine = EngineSiamese(backend=backend_type)
     
     # Load QCTN
-    qctn_cores_file = "./assets/qctn_cores_3qubits_exp1.safetensors"
     if not os.path.exists(qctn_cores_file):
         print(f"Warning: {qctn_cores_file} not found. Using random initialization.")
         qctn_graph = QCTNHelper.generate_example_graph()
@@ -161,10 +171,24 @@ def test_random_probabilities():
     
     circuit_states = generate_circuit_states_list(D, K)
     
+    circuit_states = [engine.backend.convert_to_tensor(s) for s in circuit_states]
+    measure_input_list = [engine.backend.convert_to_tensor(m) for m in measure_input_list]
+
     # 1. Full Probability
     prob_full = engine.calculate_full_probability(qctn, circuit_states, measure_input_list)
     print(f"Full Probability: {prob_full.item()}")
     
+    # tmp = measure_input_list[0]
+    # measure_input_list[0] = None
+    # prob_matrix = engine.contract_with_compiled_strategy(qctn, circuit_states, measure_input_list)
+    # print(f"prob_matrix: {prob_matrix} {prob_matrix.shape}")
+
+    # print(f"tmp shape: {tmp.shape}")
+
+    # result = torch.einsum("aij,aji->a", tmp, prob_matrix)
+    
+    # print(f"Recomputed Full Probability: {result.item()}")
+
     # 2. Marginal Probability for each qubit
     print("\nMarginal Probabilities:")
     for i in range(D):
@@ -224,12 +248,12 @@ def test_random_probabilities():
     else:
         print("Not enough qubits for conditional probability test.")
 
-def test_heatmap_marginal():
+def test_heatmap_marginal(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors",
+                          output_file = './assets/marginal_probability_heatmap_3qubits01.png'):
     print("\n=== Test 2: Heatmap Marginal ===")
     backend_type = 'pytorch'
     engine = EngineSiamese(backend=backend_type)
     
-    qctn_cores_file = "./assets/qctn_cores_3qubits_exp1.safetensors"
     if not os.path.exists(qctn_cores_file):
         print(f"Warning: {qctn_cores_file} not found. Using random initialization.")
         qctn_graph = QCTNHelper.generate_example_graph()
@@ -249,6 +273,9 @@ def test_heatmap_marginal():
     measure_input_list = data_list[0][0]
     
     circuit_states = generate_circuit_states_list(D, K)
+
+    circuit_states = [engine.backend.convert_to_tensor(s) for s in circuit_states]
+    measure_input_list = [engine.backend.convert_to_tensor(m) for m in measure_input_list]
     
     # Calculate Marginal Probability for first 2 qubits
     print("Calculating marginal probability for qubits [0, 1]...")
@@ -267,11 +294,61 @@ def test_heatmap_marginal():
     plt.imshow(heatmap, cmap='hot', interpolation='nearest')
     plt.colorbar()
     plt.title('Marginal Probability Heatmap (q0, q1)')
-    output_file = './assets/marginal_probability_heatmap_3qubits01.png'
+    
     plt.savefig(output_file)
     print(f"Heatmap saved to {output_file}")
 
+def test_sampling(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors"):
+    print("\n=== Test 3: Sampling ===")
+    backend_type = 'pytorch'
+    engine = EngineSiamese(backend=backend_type)
+    
+    # Create a simple 2-qubit circuit (Bell state like)
+    # -2-A-2-
+    # -2-B-2-
+    # If we set cores to Identity, and inputs to |+>, we get |+>|+>
+    # If we set cores to create entanglement, we can test correlations.
+    
+    # Let's use the random QCTN from file or generate one
+    if not os.path.exists(qctn_cores_file):
+        print(f"Warning: {qctn_cores_file} not found. Using random initialization.")
+        qctn_graph = QCTNHelper.generate_example_graph()
+        qctn = QCTN(qctn_graph, backend=engine.backend)
+    else:
+        qctn_graph = QCTNHelper.generate_example_graph()
+        qctn = QCTN.from_pretrained(qctn_graph, qctn_cores_file, backend=engine.backend)
+    
+    D = qctn.nqubits
+    K = 3 # Dimension
+    
+    # Circuit states: |0>
+    circuit_states = generate_circuit_states_list(D, K)
+    # Expand to match batch size? sample method handles it if we pass list of (dim,) tensors
+    # But let's pass (dim,) tensors as in other tests
+    
+    num_samples = 5
+    
+    print(f"Sampling {num_samples} samples from {D}-qubit circuit...")
+    samples = engine.sample(qctn, circuit_states, num_samples, K)
+    
+    print(f"Samples shape: {samples.shape}")
+    print(f"First 5 samples:\n{samples[:5]}")
+    
+    # Basic checks
+    assert samples.shape == (num_samples, D)
+    assert samples.min() >= 0
+    assert samples.max() < K
+    
+    # Check if samples are consistent (for a fixed random seed they should be deterministic)
+    # But here we are sampling, so they are random.
+    # We can check if the distribution matches marginals?
+    # That would be a more advanced test.
+    
+    print("Sampling test passed!")
+
+
 if __name__ == "__main__":
-    # test_probabilities()
     test_random_probabilities()
-    test_heatmap_marginal()
+    test_heatmap_marginal(qctn_cores_file="./assets/qctn_cores_3qubits_exp2.safetensors",
+                          output_file = './assets/marginal_probability_heatmap_3qubits_exp2_01.png')
+    test_sampling(qctn_cores_file="./assets/qctn_cores_3qubits_exp2.safetensors")

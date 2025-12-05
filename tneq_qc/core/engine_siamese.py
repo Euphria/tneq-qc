@@ -12,7 +12,7 @@ from typing import Optional, Union, List, Tuple, Dict, Any
 import numpy as np
 import torch
 
-from ..contractor import EinsumStrategy, StrategyCompiler
+from ..contractor import EinsumStrategy, StrategyCompiler, GreedyStrategy
 from ..backends.backend_factory import BackendFactory, ComputeBackend
 
 
@@ -70,12 +70,10 @@ class EngineSiamese:
             Backend tensor: Result of the contraction.
         """
 
-        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
         circuit_states = circuit_states_list
-        states_shape = tuple([s.shape for s in circuit_states_list])
-
-        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
-        measure_shape = tuple([m.shape for m in measure_input_list])
+        states_shape = tuple([s.shape if s is not None else () for s in circuit_states_list])
+    
+        measure_shape = tuple([m.shape if m is not None else () for m in measure_input_list])
         measure_input = measure_input_list
 
         shapes_info = {
@@ -128,12 +126,10 @@ class EngineSiamese:
             tuple: (loss, gradients)
         """
 
-        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
         circuit_states = circuit_states_list
-        states_shape = tuple([s.shape for s in circuit_states_list])
+        states_shape = tuple([s.shape if s is not None else () for s in circuit_states_list])
 
-        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
-        measure_shape = tuple([m.shape for m in measure_input_list])
+        measure_shape = tuple([m.shape if m is not None else () for m in measure_input_list])
         measure_input = measure_input_list
         
         shapes_info = {
@@ -210,10 +206,6 @@ class EngineSiamese:
         Returns:
             Backend tensor: The calculated probability.
         """
-
-        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
-        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
-
         return self.contract_with_compiled_strategy(
             qctn, 
             circuit_states_list=circuit_states_list, 
@@ -237,11 +229,12 @@ class EngineSiamese:
 
         if len(qubit_indices) != len(measure_input_list):
             raise ValueError("Length of qubit_indices must match length of measure_input_list")
-            
-        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
-        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
-
-        dim = measure_input_list[0].shape[-1]
+        
+        dim = 1
+        for m in measure_input_list:
+            if m is not None:
+                dim = m.shape[-1]
+                break
 
         full_measure_input_list = []
         
@@ -294,10 +287,11 @@ class EngineSiamese:
         if len(qubit_indices) != len(measure_input_list):
             raise ValueError("Length of qubit_indices must match length of measure_input_list")
         
-        circuit_states_list = [self.backend.convert_to_tensor(s) for s in circuit_states_list]
-        measure_input_list = [self.backend.convert_to_tensor(m) for m in measure_input_list]
-
-        dim = measure_input_list[0].shape[-1]
+        dim = 1
+        for m in measure_input_list:
+            if m is not None:
+                dim = m.shape[-1]
+                break
         # Create Identity matrix (B, K, K)
         ident = self.backend.eye(dim)
 
@@ -357,3 +351,66 @@ class EngineSiamese:
         
         epsilon = 1e-10
         return prob_joint / (prob_condition + epsilon)
+
+    # ============================================================================
+    # Sampling Methods
+    # ============================================================================
+
+    def sample(self, qctn, circuit_states_list, num_samples, dim):
+        """
+        Sample bitstrings from the quantum circuit.
+        
+        Args:
+            qctn: QCTN object
+            circuit_states_list: List of input states
+            num_samples: Number of samples (batch size)
+            dim: Dimension of each qubit (e.g. 2)
+            
+        Returns:
+            res: Tensor of shape (num_samples, nqubits) containing sampled indices.
+        """
+        
+        # Initialize measure_input_list with Identities
+        # Shape: (B, dim, dim)
+        ident = self.backend.eye(dim)
+        ident_batch = ident.unsqueeze(0).expand(num_samples, -1, -1)
+        
+        measure_input_list = [ident_batch.clone() for _ in range(qctn.nqubits)]
+        
+        res = torch.zeros((num_samples, qctn.nqubits), dtype=torch.long, device="cuda")
+        
+        for i in range(qctn.nqubits):
+            measure_input_list[i] = None
+
+            rho_i = self.contract_with_compiled_strategy(
+                qctn, 
+                circuit_states_list=circuit_states_list, 
+                measure_input_list=measure_input_list, 
+                measure_is_matrix=True
+            )
+
+            print(f"[EngineSiamese] Sampling qubit {i}, rho_i shape: {rho_i.shape}")
+
+            # Extract diagonal and normalize
+            probs_unnorm = torch.diagonal(rho_i, dim1=-2, dim2=-1) # (B, dim)
+            
+            # Handle negative values (numerical noise) and normalize
+            probs_unnorm = torch.clamp(probs_unnorm, min=0.0)
+            norms = torch.sum(probs_unnorm, dim=-1, keepdim=True)
+            probs = probs_unnorm / (norms + 1e-10)
+
+            print(f"[EngineSiamese] Qubit {i}, probs sum (should be 1): {torch.sum(probs, dim=-1)}, probs: {probs}")
+            
+            # Sample
+            sampled_indices = torch.multinomial(probs, num_samples=1) # (B, 1)
+            res[:, i] = sampled_indices.squeeze(-1)
+            
+            # Update measure_input_list[i] with projector |k><k|
+            new_measure = torch.zeros((num_samples, dim, dim), dtype=probs.dtype, device="cuda")
+            indices = sampled_indices.squeeze(-1)
+            batch_indices = torch.arange(num_samples, device="cuda")
+            new_measure[batch_indices, indices, indices] = 1.0
+            
+            measure_input_list[i] = new_measure
+            
+        return res
