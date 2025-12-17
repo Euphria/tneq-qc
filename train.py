@@ -278,9 +278,18 @@ if __name__ == "__main__":
     print(f"缓存显存: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
     print(f"Optimization Time: {toc - tic:.2f} seconds")
 
+    from pathlib import Path
+
     # save cores
-    cores_file = "./assets/qctn_cores.safetensors"
-    qctn.save_cores(cores_file, metadata={"graph": "example"})
+    cores_file = Path("./assets/qctn_cores.safetensors")
+
+    # 检查并创建目录
+    if not cores_file.parent.exists():
+        cores_file.parent.mkdir(parents=True, exist_ok=True)
+        print(f"首次创建cores file保存目录: {cores_file.parent.absolute()}")
+
+    qctn.save_cores(str(cores_file), metadata={"graph": "example"})
+    print(f"cores file保存到: {cores_file.absolute()}")
 
     exit()
 
