@@ -25,8 +25,7 @@ class EngineSiamese:
     - ComputeBackend: Executes expressions using JAX, PyTorch, etc.
     """
 
-    def __init__(self, backend: Optional[Union[str, ComputeBackend]] = None, strategy_mode: str = 'balanced',
-                 device: Optional[str] = None):
+    def __init__(self, backend: Optional[Union[str, ComputeBackend]] = None, strategy_mode: str = 'balanced'):
         """
         Initialize the engine with a specific backend and strategy mode.
         
