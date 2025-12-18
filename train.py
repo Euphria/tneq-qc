@@ -1,4 +1,5 @@
 import time
+from tneq_qc.backends.backend_factory import BackendFactory
 from tneq_qc.config import Configuration
 from tneq_qc.core.qctn import QCTN, QCTNHelper
 from tneq_qc.core.cqctn import ContractorQCTN
@@ -46,7 +47,7 @@ def eval_hermitenorm_batch(n_max, x, device='cuda'):
     
     return H
 
-def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
+def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K, device='cuda'):
     """
     Generate Mx and phi_x data
     Parameters:
@@ -60,18 +61,18 @@ def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
 
     data_list = []
 
-    weights = init_normalization_factors_vectorized()
+    weights = init_normalization_factors_vectorized(device=device)
     weights = weights[None, None, :K]
 
     for i in range(num_batch):
         
         # x变成-5到5的高斯分布
         # x = torch.empty((batch_size, num_qubits), device='cuda').uniform_(-5.0, 5.0)
-        x = torch.empty((batch_size, num_qubits), device='cuda').normal_(mean=2.5, std=1.0)
+        x = torch.empty((batch_size, num_qubits), device=device).normal_(mean=2.5, std=1.0)
         
         # print('x', x, x.shape)
         
-        out = eval_hermitenorm_batch(K - 1, x)  # shape = (K, B, D)
+        out = eval_hermitenorm_batch(K - 1, x, device=device)  # shape = (K, B, D)
         
         # print('out', out.shape)
 
@@ -99,7 +100,7 @@ def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
         data_list += [(Mx_list, out)]
     return data_list
 
-def generate_circuit_states_list(num_qubits, K):
+def generate_circuit_states_list(num_qubits, K, device='cuda'):
     """
     Generate circuit states list with status [0, 0, ..., 1] for each qubit
     Parameters:
@@ -108,7 +109,7 @@ def generate_circuit_states_list(num_qubits, K):
     Returns:
     - circuit_states_list: List of tensors representing the circuit states for each qubit
     """
-    circuit_states_list = [torch.zeros(K, device='cuda') for _ in range(num_qubits)]
+    circuit_states_list = [torch.zeros(K, device=device) for _ in range(num_qubits)]
 
     for i in range(len(circuit_states_list)):
         circuit_states_list[i][-1] = 1.0
@@ -122,7 +123,9 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
-    engine = EngineSiamese(backend=backend_type, strategy_mode="balanced")
+    backend = BackendFactory.create_backend(backend_type, device='cpu')
+
+    engine = EngineSiamese(backend=backend, strategy_mode="balanced")
 
     qctn_graph = QCTNHelper.generate_example_graph()
     # print(f"qctn_graph: \n{qctn_graph}")
@@ -133,7 +136,7 @@ if __name__ == "__main__":
     D = qctn.nqubits
     K = 3
 
-    data_list = generate_Mx_phi_x_data(num_batch=N, batch_size=B, num_qubits=D, K=K)
+    data_list = generate_Mx_phi_x_data(num_batch=N, batch_size=B, num_qubits=D, K=K, device=backend.backend_info.device)
 
     # print('data_list[0] shape:', data_list[0][-1].shape)
 
@@ -152,7 +155,7 @@ if __name__ == "__main__":
         } for x in data_list
     ]
 
-    circuit_states_list = generate_circuit_states_list(num_qubits=D, K=K)
+    circuit_states_list = generate_circuit_states_list(num_qubits=D, K=K, device=backend.backend_info.device)
 
     # torch profiler memory usage test
     import torch.profiler

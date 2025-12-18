@@ -1,3 +1,4 @@
+from tneq_qc.backends import backend_factory
 import torch
 import numpy as np
 import math
@@ -28,13 +29,13 @@ def eval_hermitenorm_batch(n_max, x, device='cuda'):
             H[i] = x * H[i-1] - (i-1) * H[i-2]
     return H
 
-def generate_Mx_phi_x_uniform(num_batch, batch_size, num_qubits, K, edge_size):
+def generate_Mx_phi_x_uniform(num_batch, batch_size, num_qubits, K, edge_size, device='cuda'):
     data_list = []
-    weights = init_normalization_factors_vectorized()
+    weights = init_normalization_factors_vectorized(device=device)
     weights = weights[None, None, :K]
 
     for i in range(num_batch):
-        x = torch.empty((batch_size, num_qubits), device='cuda')
+        x = torch.empty((batch_size, num_qubits), device=device)
         delta = 5 / edge_size
         step = 10 / edge_size
         for dx in range(edge_size):
@@ -42,9 +43,9 @@ def generate_Mx_phi_x_uniform(num_batch, batch_size, num_qubits, K, edge_size):
                 vals = [dx * step - 5 + delta / 2, dy * step - 5 + delta / 2]
                 if num_qubits > 2:
                     vals += [0.0] * (num_qubits - 2)
-                x[dx * edge_size + dy, :] = torch.tensor(vals, device='cuda')
+                x[dx * edge_size + dy, :] = torch.tensor(vals, device=device)
 
-        out = eval_hermitenorm_batch(K - 1, x)
+        out = eval_hermitenorm_batch(K - 1, x, device=device)
         out.transpose_(0, 1).transpose_(1, 2)
         out = weights * torch.sqrt(torch.exp(- torch.square(x) / 2))[:, :, None] * out
         
@@ -55,14 +56,14 @@ def generate_Mx_phi_x_uniform(num_batch, batch_size, num_qubits, K, edge_size):
         data_list += [(Mx_list, out)]
     return data_list
 
-def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
+def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K, device='cuda'):
     data_list = []
-    weights = init_normalization_factors_vectorized()
+    weights = init_normalization_factors_vectorized(device=device)
     weights = weights[None, None, :K]
 
     for i in range(num_batch):
-        x = torch.empty((batch_size, num_qubits), device='cuda').normal_(mean=0.0, std=1.0)
-        out = eval_hermitenorm_batch(K - 1, x)
+        x = torch.empty((batch_size, num_qubits), device=device).normal_(mean=0.0, std=1.0)
+        out = eval_hermitenorm_batch(K - 1, x, device=device)
         out.transpose_(0, 1).transpose_(1, 2)
         out = weights * torch.sqrt(torch.exp(- torch.square(x) / 2))[:, :, None] * out
         
@@ -73,8 +74,8 @@ def generate_Mx_phi_x_data(num_batch, batch_size, num_qubits, K):
         data_list += [(Mx_list, out)]
     return data_list
 
-def generate_circuit_states_list(num_qubits, K):
-    circuit_states_list = [torch.zeros(K, device='cuda') for _ in range(num_qubits)]
+def generate_circuit_states_list(num_qubits, K, device='cuda'):
+    circuit_states_list = [torch.zeros(K, device=device) for _ in range(num_qubits)]
     for i in range(len(circuit_states_list)):
         circuit_states_list[i][-1] = 1.0
     return circuit_states_list
@@ -87,7 +88,8 @@ def test_probabilities():
     print("\n=== Test 0: Simple Probabilities (v2) ===")
     # Setup
     backend_type = 'pytorch'
-    engine = EngineSiamese(backend=backend_type)
+    backend = backend_factory.BackendFactory.create_backend(backend_type, device='cuda')
+    engine = EngineSiamese(backend=backend)
     
     # Create a simple 2-qubit circuit
     graph = "-2-A-2-\n-2-B-2-"
@@ -147,10 +149,11 @@ def test_probabilities():
     assert torch.allclose(cond_prob, expected, atol=1e-5)
     print("Conditional probability test passed!")
 
-def test_random_probabilities(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors"):
+def test_random_probabilities(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors", device='cuda'):
     print("\n=== Test 1: Random Probabilities ===")
     backend_type = 'pytorch'
-    engine = EngineSiamese(backend=backend_type)
+    backend = backend_factory.BackendFactory.create_backend(backend_type, device=device)
+    engine = EngineSiamese(backend=backend)
     
     # Load QCTN
     if not os.path.exists(qctn_cores_file):
@@ -166,10 +169,10 @@ def test_random_probabilities(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.
     
     # Generate Data
     # batch_size=1, num_sample=1 (num_batch=1)
-    data = generate_Mx_phi_x_data(num_batch=1, batch_size=1, num_qubits=D, K=K)
+    data = generate_Mx_phi_x_data(num_batch=1, batch_size=1, num_qubits=D, K=K, device=device)
     measure_input_list = data[0][0] # List of Mx tensors
     
-    circuit_states = generate_circuit_states_list(D, K)
+    circuit_states = generate_circuit_states_list(D, K, device=device)
     
     circuit_states = [engine.backend.convert_to_tensor(s) for s in circuit_states]
     measure_input_list = [engine.backend.convert_to_tensor(m) for m in measure_input_list]
@@ -249,10 +252,12 @@ def test_random_probabilities(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.
         print("Not enough qubits for conditional probability test.")
 
 def test_heatmap_marginal(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors",
-                          output_file = './assets/marginal_probability_heatmap_3qubits01.png'):
+                          output_file = './assets/marginal_probability_heatmap_3qubits01.png',
+                          device='cuda'):
     print("\n=== Test 2: Heatmap Marginal ===")
     backend_type = 'pytorch'
-    engine = EngineSiamese(backend=backend_type)
+    backend = backend_factory.BackendFactory.create_backend(backend_type, device=device)
+    engine = EngineSiamese(backend=backend)
     
     if not os.path.exists(qctn_cores_file):
         print(f"Warning: {qctn_cores_file} not found. Using random initialization.")
@@ -269,10 +274,10 @@ def test_heatmap_marginal(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safe
     K = 3
     
     # Generate Uniform Data
-    data_list = generate_Mx_phi_x_uniform(num_batch=N, batch_size=B, num_qubits=D, K=K, edge_size=edge_size)
+    data_list = generate_Mx_phi_x_uniform(num_batch=N, batch_size=B, num_qubits=D, K=K, edge_size=edge_size, device=device)
     measure_input_list = data_list[0][0]
     
-    circuit_states = generate_circuit_states_list(D, K)
+    circuit_states = generate_circuit_states_list(D, K, device=device)
 
     circuit_states = [engine.backend.convert_to_tensor(s) for s in circuit_states]
     measure_input_list = [engine.backend.convert_to_tensor(m) for m in measure_input_list]
@@ -298,10 +303,11 @@ def test_heatmap_marginal(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safe
     plt.savefig(output_file)
     print(f"Heatmap saved to {output_file}")
 
-def test_sampling(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors"):
+def test_sampling(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors", device='cuda'):
     print("\n=== Test 3: Sampling ===")
     backend_type = 'pytorch'
-    engine = EngineSiamese(backend=backend_type)
+    backend = backend_factory.BackendFactory.create_backend(backend_type, device=device)
+    engine = EngineSiamese(backend=backend)
     
     # Create a simple 2-qubit circuit (Bell state like)
     # -2-A-2-
@@ -322,7 +328,7 @@ def test_sampling(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors"
     K = 3 # Dimension
     
     # Circuit states: |0>
-    circuit_states = generate_circuit_states_list(D, K)
+    circuit_states = generate_circuit_states_list(D, K, device=device)
     # Expand to match batch size? sample method handles it if we pass list of (dim,) tensors
     # But let's pass (dim,) tensors as in other tests
     
@@ -348,7 +354,8 @@ def test_sampling(qctn_cores_file="./assets/qctn_cores_3qubits_exp1.safetensors"
 
 
 if __name__ == "__main__":
-    test_random_probabilities()
+    test_random_probabilities(device='cpu')
     test_heatmap_marginal(qctn_cores_file="./assets/qctn_cores_3qubits_exp2.safetensors",
-                          output_file = './assets/marginal_probability_heatmap_3qubits_exp2_01.png')
-    test_sampling(qctn_cores_file="./assets/qctn_cores_3qubits_exp2.safetensors")
+                          output_file = './assets/marginal_probability_heatmap_3qubits_exp2_01.png',
+                          device='cpu')
+    test_sampling(qctn_cores_file="./assets/qctn_cores_3qubits_exp2.safetensors", device='cpu')
