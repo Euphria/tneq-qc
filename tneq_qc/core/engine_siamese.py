@@ -41,7 +41,7 @@ class EngineSiamese:
         if backend is None:
             self.backend = BackendFactory.get_default_backend()
         elif isinstance(backend, str):
-            self.backend = BackendFactory.create_backend(backend, device="cuda")
+            self.backend = BackendFactory.create_backend(backend, device="cpu")
         else:
             self.backend = backend
 
