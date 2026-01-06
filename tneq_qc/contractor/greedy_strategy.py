@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Dict, Any, Callable, List, Set, Optional
 from copy import deepcopy
 from enum import Enum
+from ..core.tn_tensor import TNTensor
 
 from .base import ContractionStrategy
 
@@ -792,7 +793,31 @@ def _contract_symmetric_group(
     # print(f"  Tensor shapes: {[t.shape for t in tensor_list]}")
     
     # Execute contraction
-    result_tensor = torch.einsum(einsum_eq, *tensor_list)
+    # result_tensor = torch.einsum(einsum_eq, *tensor_list)
+    
+    # Check for TNTensors and prepare inputs for einsum
+    raw_tensor_list = []
+    total_scale = 1.0
+    has_tntensor = False
+
+    for t in tensor_list:
+        if isinstance(t, TNTensor):
+            has_tntensor = True
+            raw_tensor_list.append(t.tensor)
+            total_scale *= t.scale
+        else:
+            raw_tensor_list.append(t)
+    
+    # Execute contraction
+    if has_tntensor:
+        # Use raw tensors for contraction
+        raw_result = torch.einsum(einsum_eq, *raw_tensor_list)
+        
+        # Create result TNTensor
+        result_tensor = TNTensor(raw_result, scale=total_scale)
+        # result_tensor.auto_scale()
+    else:
+        result_tensor = torch.einsum(einsum_eq, *tensor_list)
     
     # print(f"  Result shape: {result_tensor.shape}")
     

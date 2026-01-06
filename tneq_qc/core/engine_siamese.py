@@ -13,6 +13,7 @@ import numpy as np
 
 from ..contractor import EinsumStrategy, StrategyCompiler, GreedyStrategy
 from ..backends.backend_factory import BackendFactory, ComputeBackend
+from .tn_tensor import TNTensor
 
 
 class EngineSiamese:
@@ -102,7 +103,8 @@ class EngineSiamese:
             print(f"[EngineSiamese] Using cached strategy: {strategy_name}")
         
         # Prepare data
-        cores_dict = {name: self.backend.convert_to_tensor(qctn.cores_weights[name]) for name in qctn.cores}
+        # Pass cores weights directly to support TNTensor
+        cores_dict = {name: qctn.cores_weights[name] for name in qctn.cores}
         
         # Execute
         result = compute_fn(cores_dict, circuit_states, measure_input)
@@ -156,30 +158,105 @@ class EngineSiamese:
             compute_fn = cached['compute_fn']
             strategy_name = cached['strategy_name']
             # print(f"[EngineSiamese] Using cached strategy: {strategy_name}")
-            
+
+        # Prepare tensors for gradient calculation
+        # We need to separate tensors (which require grad) from scales (constants)
+        raw_core_tensors = []
+        core_scales = []
+        
+        for c_name in qctn.cores:
+            c = qctn.cores_weights[c_name]
+            if isinstance(c, TNTensor):
+                raw_core_tensors.append(c.tensor)
+                core_scales.append(c.scale)
+            else:
+                raw_core_tensors.append(c)
+                core_scales.append(1.0)
+
         # Define loss function
-        def loss_fn(*core_tensors):
-            # Reconstruct cores_dict
-            cores_dict = {name: tensor for name, tensor in zip(qctn.cores, core_tensors)}
+        def loss_fn(*core_tensors_args):
+            # Reconstruct cores_dict with TNTensors or raw tensors
+            reconstructed_cores_dict = {}
+
+            
+
+            for i, name in enumerate(qctn.cores):
+                tensor = core_tensors_args[i]
+                scale = core_scales[i]
+                
+                # Check if we should wrap in TNTensor
+                # We do this if the original was TNTensor (scale != 1.0 is a heuristic, but better to check original type)
+                # But here we simplified lists. Let's assume if we have a scale, we wrap.
+                # Actually, compute_fn might EXPECT TNTensor if strategy was compiled/checked against it?
+                # GreedyStrategy is dynamic.
+                
+                if isinstance(qctn.cores_weights[name], TNTensor):
+                    reconstructed_cores_dict[name] = TNTensor(tensor, scale)
+                else:
+                    reconstructed_cores_dict[name] = tensor
+
             
             # Execute contraction
-            result = compute_fn(cores_dict, circuit_states, measure_input)
+            # compute_fn will handle TNTensors internally (auto-scaling intermediate results)
+            result = compute_fn(reconstructed_cores_dict, circuit_states, measure_input)
+            
+            # Result might be TNTensor or raw tensor
+            if isinstance(result, TNTensor):
+                res_tensor = result.tensor
+                res_scale = result.scale
+            else:
+                res_tensor = result
+                res_scale = 1.0
             
             # Compute Cross Entropy loss
             # Target is all ones (maximizing probability)
-            target = self.backend.ones(result.shape, dtype=result.dtype)
+            target = self.backend.ones(res_tensor.shape, dtype=res_tensor.dtype)
             
             # Avoid log(0)
-            result = self.backend.clamp(result, min=1e-10)
-            log_result = self.backend.log(result)
-            return -self.backend.mean(target * log_result)
-        
-        # Prepare core tensors
-        core_tensors = [self.backend.convert_to_tensor(qctn.cores_weights[c]) for c in qctn.cores]
+            res_tensor = self.backend.clamp(res_tensor, min=1e-10)
+            log_result = self.backend.log(res_tensor)
+
+            # print(f"res_tensor : {res_tensor}, res_scale: {res_scale}")
+
+            # Add log(scale) for correct loss value (log(P*S) = log(P) + log(S))
+            # log(S) is constant w.r.t parameters, so gradients are correct
+            detached_scale = self.backend.detach(res_scale)
+            
+            # # Handle float/scalar scale for log
+            # import torch
+            if isinstance(detached_scale, (int, float)):
+                 log_scale = np.log(detached_scale)
+            else:
+                 # Check if 0-dim tensor
+                 if detached_scale.ndim == 0:
+                      log_scale = self.backend.log(detached_scale)
+                 else:
+                      log_scale = self.backend.log(detached_scale)
+
+            # print('log_scale', log_scale)
+
+            log_total = log_result + log_scale
+            
+            return -self.backend.mean(target * log_total)
         
         # Compute gradients
         # We want gradients with respect to all cores
-        argnums = list(range(len(core_tensors)))
+        argnums = list(range(len(raw_core_tensors)))
+        
+        # Create value_and_grad function
+        value_and_grad_fn = self.backend.compute_value_and_grad(loss_fn, argnums=argnums)
+        
+        # Execute
+        loss, grads = value_and_grad_fn(*raw_core_tensors)
+        
+
+        # grads = [grads[i] / core_scales[i] for i in range(len(core_scales))]
+
+        # tmp = {i: (grads[i], core_scales[i]) for i in range(len(grads))}
+        # print(f"grads : {tmp}")
+        # print(f"scale : {{i: core_scales[i] for i in range(len(core_scales))}}")
+
+        return loss, grads
         
         # Create value_and_grad function
         value_and_grad_fn = self.backend.compute_value_and_grad(loss_fn, argnums=argnums)

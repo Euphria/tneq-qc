@@ -125,21 +125,52 @@ class BackendPyTorch(ComputeBackend):
         """
         Perform a single optimization step using PyTorch.
         """
+        raw_params = []
+        is_tntensor_info = []
+        
+        for p in params:
+            if hasattr(p, 'tensor') and hasattr(p, 'scale') and hasattr(p, 'auto_scale'):
+                scale = p.scale
+                p.scale_to(1.0)
+                raw_params.append(p.tensor)
+                is_tntensor_info.append((True, scale, type(p)))
+            else:
+                raw_params.append(p)
+                is_tntensor_info.append((False, None, None))
+        
+        scaled_grads = []
+        for i, g in enumerate(grads):
+            is_tn, scale, _ = is_tntensor_info[i]
+            if is_tn:
+                scaled_grads.append(g / scale)
+            else:
+                scaled_grads.append(g)
+        grads = scaled_grads
+
         with self.torch.no_grad():
             if method == 'adam':
-                return self._adam_step(params, grads, state, hyperparams)
+                new_raw_params, new_state = self._adam_step(raw_params, grads, state, hyperparams)
             elif method == 'sgd':
-                return self._sgd_step(params, grads, state, hyperparams)
+                new_raw_params, new_state = self._sgd_step(raw_params, grads, state, hyperparams)
             elif method == 'sgdg':
-                return self._sgdg_step(params, grads, state, hyperparams)
+                new_raw_params, new_state = self._sgdg_step(raw_params, grads, state, hyperparams)
             elif method == 'momentum':
-                return self._momentum_step(params, grads, state, hyperparams)
+                new_raw_params, new_state = self._momentum_step(raw_params, grads, state, hyperparams)
             elif method == 'nesterov':
-                return self._nesterov_step(params, grads, state, hyperparams)
+                new_raw_params, new_state = self._nesterov_step(raw_params, grads, state, hyperparams)
             elif method == 'rmsprop':
-                return self._rmsprop_step(params, grads, state, hyperparams)
+                new_raw_params, new_state = self._rmsprop_step(raw_params, grads, state, hyperparams)
             else:
                 raise ValueError(f"Unknown optimization method: {method}")
+        
+        for i, (is_tn, scale, tn_class) in enumerate(is_tntensor_info):
+            if is_tn:
+                params[i] = tn_class(new_raw_params[i], 1.0)
+                params[i].scale_to(scale)
+            else:
+                params[i] = new_raw_params[i]
+                
+        return params, new_state
 
     def _adam_step(self, params, grads, state, hp):
         lr = hp.get('learning_rate', 0.01)
@@ -426,3 +457,9 @@ class BackendPyTorch(ComputeBackend):
         if dim is None:
             return tensor.squeeze()
         return tensor.squeeze(dim)
+
+    def detach(self, tensor):
+        """Detach tensor from computation graph."""
+        if hasattr(tensor, 'detach'):
+            return tensor.detach()
+        return tensor

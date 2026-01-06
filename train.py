@@ -132,7 +132,8 @@ if __name__ == "__main__":
     qctn = QCTN(qctn_graph, backend=engine.backend)
 
     N = 100
-    B = 128
+    # B = 128
+    B = 4
     D = qctn.nqubits
     K = 3
 
@@ -251,7 +252,7 @@ if __name__ == "__main__":
 
     optimizer = Optimizer(
         method='sgdg', 
-        max_iter=1000, 
+        max_iter=10, 
         # tol=1e-6, 
         tol=0.0, 
         learning_rate=1e-2, 
@@ -259,7 +260,7 @@ if __name__ == "__main__":
         beta2=0.95, 
         epsilon=1e-8,
         engine=engine,
-        lr_schedule=lr_schedule,
+        # lr_schedule=lr_schedule,
 
         momentum=0.9,            # 动量因子
         stiefel=True,            # 启用 Stiefel 流形优化
