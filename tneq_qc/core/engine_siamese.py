@@ -190,9 +190,17 @@ class EngineSiamese:
         """
 
         circuit_states = circuit_states_list
-        states_shape = tuple([s.shape if s is not None else () for s in circuit_states_list])
+        if isinstance(circuit_states_list, list):
+            states_shape = tuple([s.shape if s is not None else () for s in circuit_states_list])
+        elif isinstance(circuit_states_list, dict):
+            states_shape = tuple([circuit_states_list[i].shape if circuit_states_list[i] is not None else () 
+                                  for i in sorted(circuit_states_list.keys())])
     
-        measure_shape = tuple([m.shape if m is not None else () for m in measure_input_list])
+        if isinstance(measure_input_list, list):
+            measure_shape = tuple([m.shape if m is not None else () for m in measure_input_list])
+        elif isinstance(measure_input_list, dict):
+            measure_shape = tuple([measure_input_list[i].shape if measure_input_list[i] is not None else () 
+                                  for i in sorted(measure_input_list.keys())])
         measure_input = measure_input_list
 
         shapes_info = {
@@ -228,7 +236,9 @@ class EngineSiamese:
         # Execute
         result = compute_fn(cores_dict, circuit_states, measure_input)
         
-        return result
+        result.scale_to(1.0)
+
+        return result.tensor
 
     def contract_with_compiled_strategy_for_gradient(self, qctn, circuit_states_list, measure_input_list, measure_is_matrix=True) -> Tuple:
         """

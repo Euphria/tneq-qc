@@ -2,7 +2,7 @@
 Tests for Distributed Training Module
 
 Tests the MPI backend, data parallel trainer, and distributed engine.
-These tests use MockMPIBackend to run without actual MPI.
+These tests use MockCommMPI to run without actual MPI.
 """
 
 import pytest
@@ -13,14 +13,14 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-class TestMPIBackend:
+class TestCommMPI:
     """Tests for MPI communication backend."""
     
     def test_mock_backend_initialization(self):
-        """Test MockMPIBackend initialization."""
-        from tneq_qc.distributed.comm import MockMPIBackend, DistributedContext
+        """Test MockCommMPI initialization."""
+        from tneq_qc.distributed.comm import MockCommMPI, DistributedContext
         
-        backend = MockMPIBackend()
+        backend = MockCommMPI()
         
         assert backend.rank == 0
         assert backend.world_size == 1
@@ -34,63 +34,63 @@ class TestMPIBackend:
     
     def test_mock_backend_broadcast(self):
         """Test broadcast operation with mock backend."""
-        import torch
-        from tneq_qc.distributed.comm import MockMPIBackend
+        import numpy as np
+        from tneq_qc.distributed.comm import MockCommMPI
         
-        backend = MockMPIBackend()
+        backend = MockCommMPI()
         
-        tensor = torch.randn(3, 4)
-        result = backend.broadcast(tensor, src=0)
+        arr = np.random.randn(3, 4)
+        result = backend.broadcast(arr, src=0)
         
-        assert result.shape == tensor.shape
-        assert torch.allclose(result, tensor)
+        assert result.shape == arr.shape
+        assert np.allclose(result, arr)
     
     def test_mock_backend_allreduce(self):
         """Test allreduce operation with mock backend."""
-        import torch
-        from tneq_qc.distributed.comm import MockMPIBackend, ReduceOp
+        import numpy as np
+        from tneq_qc.distributed.comm import MockCommMPI, ReduceOp
         
-        backend = MockMPIBackend()
+        backend = MockCommMPI()
         
-        tensor = torch.randn(3, 4)
-        result = backend.allreduce(tensor, op=ReduceOp.SUM)
+        arr = np.random.randn(3, 4)
+        result = backend.allreduce(arr, op=ReduceOp.SUM)
         
-        assert result.shape == tensor.shape
-        assert torch.allclose(result, tensor)
+        assert result.shape == arr.shape
+        assert np.allclose(result, arr)
     
     def test_mock_backend_allgather(self):
         """Test allgather operation with mock backend."""
-        import torch
-        from tneq_qc.distributed.comm import MockMPIBackend
+        import numpy as np
+        from tneq_qc.distributed.comm import MockCommMPI
         
-        backend = MockMPIBackend()
+        backend = MockCommMPI()
         
-        tensor = torch.randn(3, 4)
-        result = backend.allgather(tensor)
+        arr = np.random.randn(3, 4)
+        result = backend.allgather(arr)
         
         assert len(result) == 1
-        assert torch.allclose(result[0], tensor)
+        assert np.allclose(result[0], arr)
     
-    def test_mock_backend_allreduce_tensors(self):
-        """Test allreduce on tensor list with mock backend."""
-        import torch
-        from tneq_qc.distributed.comm import MockMPIBackend, ReduceOp
+    def test_mock_backend_allreduce_list(self):
+        """Test allreduce on array list with mock backend."""
+        import numpy as np
+        from tneq_qc.distributed.comm import MockCommMPI, ReduceOp
         
-        backend = MockMPIBackend()
+        backend = MockCommMPI()
         
-        tensors = [torch.randn(3, 4), torch.randn(5, 6)]
-        results = backend.allreduce_tensors(tensors, op=ReduceOp.AVG)
+        arrays = [np.random.randn(3, 4), np.random.randn(5, 6)]
+        results = backend.allreduce_list(arrays, op=ReduceOp.AVG)
         
-        assert len(results) == len(tensors)
-        for r, t in zip(results, tensors):
-            assert r.shape == t.shape
-            assert torch.allclose(r, t)
+        assert len(results) == len(arrays)
+        for r, a in zip(results, arrays):
+            assert r.shape == a.shape
+            assert np.allclose(r, a)
     
     def test_mock_backend_allreduce_scalar(self):
         """Test scalar allreduce with mock backend."""
-        from tneq_qc.distributed.comm import MockMPIBackend, ReduceOp
+        from tneq_qc.distributed.comm import MockCommMPI, ReduceOp
         
-        backend = MockMPIBackend()
+        backend = MockCommMPI()
         
         value = 3.14
         result = backend.allreduce_scalar(value, op=ReduceOp.SUM)
@@ -98,11 +98,11 @@ class TestMPIBackend:
         assert result == value
     
     def test_get_backend_mock(self):
-        """Test get_backend with use_mpi=False."""
-        from tneq_qc.distributed.comm import get_backend, MockMPIBackend
+        """Test get_comm_mpi with use_mpi=False."""
+        from tneq_qc.distributed.comm import get_comm_mpi, MockCommMPI
         
-        backend = get_backend(use_mpi=False)
-        assert isinstance(backend, MockMPIBackend)
+        backend = get_comm_mpi(use_mpi=False)
+        assert isinstance(backend, MockCommMPI)
     
     def test_reduce_op_values(self):
         """Test ReduceOp enum values."""
@@ -221,19 +221,19 @@ class TestDataParallelTrainer:
     def setup_trainer(self):
         """Setup trainer with mock components."""
         import torch
-        from tneq_qc.distributed.comm import MockMPIBackend
+        from tneq_qc.distributed.comm import MockCommMPI
         from tneq_qc.distributed.parallel import DataParallelTrainer, TrainingConfig
         from tneq_qc.core.engine_siamese import EngineSiamese
-        from tneq_qc.core.qctn import QCTN
+        from tneq_qc.core.qctn import QCTN, QCTNHelper
         
         # Create simple QCTN
-        graph = "-3-A-3-B-3-"
+        graph = QCTNHelper.generate_example_graph(n=4)
         backend = "pytorch"
         
         engine = EngineSiamese(backend=backend, strategy_mode='fast')
         qctn = QCTN(graph, backend=engine.backend)
         config = TrainingConfig(max_steps=10, log_interval=5)
-        mpi = MockMPIBackend()
+        mpi = MockCommMPI()
         
         trainer = DataParallelTrainer(
             engine=engine,
@@ -310,9 +310,9 @@ class TestDistributedEngineSiamese:
     def test_engine_initialization(self):
         """Test distributed engine initialization."""
         from tneq_qc.distributed.engine import DistributedEngineSiamese
-        from tneq_qc.distributed.comm import MockMPIBackend
+        from tneq_qc.distributed.comm import MockCommMPI
         
-        mpi = MockMPIBackend()
+        mpi = MockCommMPI()
         engine = DistributedEngineSiamese(
             backend='pytorch',
             strategy_mode='fast',
@@ -326,9 +326,9 @@ class TestDistributedEngineSiamese:
     def test_engine_backend_proxy(self):
         """Test that engine proxies to base engine."""
         from tneq_qc.distributed.engine import DistributedEngineSiamese
-        from tneq_qc.distributed.comm import MockMPIBackend
+        from tneq_qc.distributed.comm import MockCommMPI
         
-        mpi = MockMPIBackend()
+        mpi = MockCommMPI()
         engine = DistributedEngineSiamese(
             backend='pytorch',
             mpi_backend=mpi
@@ -343,9 +343,9 @@ class TestDistributedEngineSiamese:
         """Test measurement matrix partitioning."""
         import torch
         from tneq_qc.distributed.engine import DistributedEngineSiamese
-        from tneq_qc.distributed.comm import MockMPIBackend
+        from tneq_qc.distributed.comm import MockCommMPI
         
-        mpi = MockMPIBackend()
+        mpi = MockCommMPI()
         engine = DistributedEngineSiamese(backend='pytorch', mpi_backend=mpi)
         
         # Create mock measure matrices
@@ -361,10 +361,10 @@ class TestDistributedEngineSiamese:
     def test_tensor_parallel_not_enabled(self):
         """Test tensor parallel raises error when not enabled."""
         from tneq_qc.distributed.engine import DistributedEngineSiamese
-        from tneq_qc.distributed.comm import MockMPIBackend
+        from tneq_qc.distributed.comm import MockCommMPI
         from tneq_qc.core.qctn import QCTN
         
-        mpi = MockMPIBackend()
+        mpi = MockCommMPI()
         engine = DistributedEngineSiamese(backend='pytorch', mpi_backend=mpi)
         
         qctn = QCTN("-3-A-3-", backend=engine.backend)
@@ -375,9 +375,9 @@ class TestDistributedEngineSiamese:
     def test_setup_tensor_parallel(self):
         """Test tensor parallel configuration."""
         from tneq_qc.distributed.engine import DistributedEngineSiamese
-        from tneq_qc.distributed.comm import MockMPIBackend
+        from tneq_qc.distributed.comm import MockCommMPI
         
-        mpi = MockMPIBackend()
+        mpi = MockCommMPI()
         engine = DistributedEngineSiamese(backend='pytorch', mpi_backend=mpi)
         
         config = {'partition_dim': 'batch', 'min_size': 100}
@@ -417,7 +417,7 @@ class TestIntegration:
     def test_simple_training_mock(self):
         """Test simple training flow with mock MPI."""
         import torch
-        from tneq_qc.distributed.comm import MockMPIBackend
+        from tneq_qc.distributed.comm import MockCommMPI
         from tneq_qc.distributed.parallel import DataParallelTrainer, TrainingConfig
         from tneq_qc.core.engine_siamese import EngineSiamese
         from tneq_qc.core.qctn import QCTN
@@ -426,7 +426,7 @@ class TestIntegration:
         graph = "-3-A-3-B-3-"
         engine = EngineSiamese(backend='pytorch', strategy_mode='balanced')
         qctn = QCTN(graph, backend=engine.backend)
-        mpi = MockMPIBackend()
+        mpi = MockCommMPI()
         
         config = TrainingConfig(
             max_steps=5,

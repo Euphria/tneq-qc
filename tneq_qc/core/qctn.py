@@ -270,6 +270,7 @@ class QCTN:
         self.graph = graph
         self.qubits = graph.strip().splitlines()
         self.nqubits = len(self.qubits)
+        self.qubit_indices = list(range(self.nqubits))
         
         import opt_einsum
         full_cores = set([opt_einsum.get_symbol(i) for i in range(10000)])
