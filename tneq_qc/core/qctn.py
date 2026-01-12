@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Union, Any, Optional, Mapping
 from ..config import Configuration
 from ..backends.copteinsum import ContractorOptEinsum
+from .tn_tensor import TNTensor
 
 class QCTNHelper:
     """
@@ -29,7 +30,7 @@ class QCTNHelper:
             yield symbol
 
     @staticmethod
-    def generate_example_graph(target=False):
+    def generate_example_graph(n=16, target=False):
         """Generate an example quantum circuit graph."""
         if target:
             return  "-2-A-5-----C-3-----E-2-\n" \
@@ -65,8 +66,8 @@ class QCTNHelper:
                     
                     graph += line + "\n"
                 return graph
-
-            return generate_std_graph(3)
+            
+            return generate_std_graph(n)
         
             # return  "-3-A-3-"
             # return  "-3-A-3-B-3-C-3-D-3-"
@@ -269,6 +270,7 @@ class QCTN:
         self.graph = graph
         self.qubits = graph.strip().splitlines()
         self.nqubits = len(self.qubits)
+        self.qubit_indices = list(range(self.nqubits))
         
         import opt_einsum
         full_cores = set([opt_einsum.get_symbol(i) for i in range(10000)])
@@ -522,7 +524,8 @@ class QCTN:
             full_shape = input_shape + output_shape
             core = self.backend.reshape(core, full_shape)
 
-            self.cores_weights[core_name] = core
+            self.cores_weights[core_name] = TNTensor(core)
+            self.cores_weights[core_name].auto_scale()
 
     def save_cores(self, file_path: Union[str, Path], metadata: Optional[Mapping[str, str]] = None):
         """Save all core tensors into a safetensors file."""
@@ -537,7 +540,10 @@ class QCTN:
 
         tensor_dict = {}
         for core_name, tensor in self.cores_weights.items():
-            tensor_dict[f"core_{core_name}"] = self.backend.tensor_to_numpy(tensor)
+            if isinstance(tensor, TNTensor):
+                tensor_dict[f"core_{core_name}"] = self.backend.tensor_to_numpy(tensor.tensor * tensor.scale)
+            else:
+                tensor_dict[f"core_{core_name}"] = self.backend.tensor_to_numpy(tensor)
 
         metadata_dict = {} if metadata is None else {str(k): str(v) for k, v in metadata.items()}
         save_file(tensor_dict, str(file_path), metadata=metadata_dict)
@@ -567,7 +573,10 @@ class QCTN:
                     raise KeyError(f"Missing tensor for core {core_name} in {file_path}")
                 continue
             array = tensor_dict[key]
-            self.cores_weights[core_name] = self.backend.convert_to_tensor(array)
+            tensor = self.backend.convert_to_tensor(array)
+            tn_tensor = TNTensor(tensor)
+            tn_tensor.auto_scale()
+            self.cores_weights[core_name] = tn_tensor
 
         metadata_dict = {str(k): str(v) for k, v in metadata.items()}
         self._loaded_metadata = metadata_dict

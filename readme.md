@@ -50,6 +50,9 @@ A quantum circuit is described as a multi-line string, where each line represent
 - [x] Basic tensor network architecture
 - [x] Mx module support (multi-dimensional tensor operations)
 - [x] Batch Training support
+- [x] Full probability, marginal probability, conditional probability, and sampling
+- [x] Tensor scale support (high-precision scale + [-1, 1] tensor for numerical stability)
+- [ ] Model split and concat operations
 
 ### 2. Genetic Algorithm
 - [x] Graph representation method (TNGraph with ASCII art)
@@ -61,20 +64,16 @@ A quantum circuit is described as a multi-line string, where each line represent
 - [x] JAX backend
 - [ ] cuTensorNet backend (NVIDIA GPU acceleration)
 - [x] PyTorch backend
-- [ ] Remove other backend and only support PyTorch
 - [x] opt_einsum contract
 - [ ] Custom hand-crafted contraction method (optimized for specific patterns)
 
 ### 4. Distributed Computing Support
 - [x] MPI-based distribution (master-worker architecture)
 - [ ] ... (other distributed frameworks)
-- [x] Multi-GPU support (single node)
-- [ ] Multi-node support (cluster computing)
+- [ ] Multi-node CPU distributed computing support
 
-### 5. Observations
-- [ ] 经过测试，可支持至少27个qubits，在batch_size<=8的情况下训练，显存占用37G。batch_size > 8 OOM（超过50G）
-- [ ] 显存占用不呈线性增长。batch size < 8 时始终37G，batch_size > 8 突变
-- [ ] 训练有明显的梯度消失
-- [ ] 由于TN结果不能保证输出在0-1范围，交叉熵loss会出现优化到负值的情况
-- [ ] MSE loss 梯度更小，消失更明显，且在对梯度进行缩放后也难以收敛。
-- [ ] adam训练时如果对梯度缩放容易nan
+### 5. Contraction Strategy Support
+- [x] Extensible contraction strategy interface
+- [x] Greedy contraction strategy
+- [ ] More advanced contraction strategies
+- [ ] Distributed contraction strategy

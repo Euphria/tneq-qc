@@ -1,5 +1,6 @@
 import random
 from typing import Callable, Optional
+from ..core.tn_tensor import TNTensor
 
 class Optimizer:
     """

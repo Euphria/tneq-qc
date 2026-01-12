@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Dict, Any, Callable, List, Set, Optional
 from copy import deepcopy
 from enum import Enum
+from ..core.tn_tensor import TNTensor
 
 from .base import ContractionStrategy
 
@@ -77,10 +78,13 @@ class GreedyStrategy(ContractionStrategy):
             # Map original core_idx to new core_idx in list
             left_core_map = {}  # original_idx -> new_idx
             
+            # print(f"qctn.adjacency_table: {len(qctn.adjacency_table)} entries")
             for core_info in qctn.adjacency_table:
                 uid = get_uid()
                 left_core_map[core_info['core_idx']] = uid
                 
+                # print(f'add core_entry {core_info["core_name"]}_L with \n in_edge_list {core_info["in_edge_list"]} \n out_edge_list {core_info["out_edge_list"]}')
+
                 core_entry = {
                     'core_idx': uid,
                     'core_name': f"{core_info['core_name']}_L",
@@ -99,70 +103,89 @@ class GreedyStrategy(ContractionStrategy):
             # 1.2 Add LEFT version circuit_states
             left_circuit_map = {} # qubit_idx -> new_idx
             
-            for qubit_idx in range(nqubits):
-                if circuit_states is not None and qubit_idx < len(circuit_states):
-                    uid = get_uid()
-                    left_circuit_map[qubit_idx] = uid
-                    
-                    circuit_entry = {
-                        'core_idx': uid,
-                        'core_name': f"circuit_L_{qubit_idx}",
-                        'tensor_source': 'circuit',
-                        'tensor_key': qubit_idx,
-                        'in_edge_list': [],
-                        'out_edge_list': [{
-                            'neighbor_idx': -1,
-                            'neighbor_name': "",
-                            'edge_rank': circuit_states[qubit_idx].shape[0],
-                            'qubit_idx': qubit_idx,
-                        }],
-                        'side': TensorSide.LEFT,
-                        'batch_symbol': "",
-                    }
-                    core_tensor_list.append(circuit_entry)
+            for qubit_idx in qctn.qubit_indices:
+                if circuit_states is None:
+                    continue
+                
+                if isinstance(circuit_states, dict):
+                    if qubit_idx not in circuit_states:
+                        continue
+                
+                if isinstance(circuit_states, list) or isinstance(circuit_states, tuple):
+                    if qubit_idx >= len(circuit_states):
+                        continue
+
+                uid = get_uid()
+                left_circuit_map[qubit_idx] = uid
+                
+                circuit_entry = {
+                    'core_idx': uid,
+                    'core_name': f"circuit_L_{qubit_idx}",
+                    'tensor_source': 'circuit',
+                    'tensor_key': qubit_idx,
+                    'in_edge_list': [],
+                    'out_edge_list': [{
+                        'neighbor_idx': -1,
+                        'neighbor_name': "",
+                        'edge_rank': circuit_states[qubit_idx].shape[0],
+                        'qubit_idx': qubit_idx,
+                    }],
+                    'side': TensorSide.LEFT,
+                    'batch_symbol': "",
+                }
+                core_tensor_list.append(circuit_entry)
             
             # 1.3 Add MIDDLE version Mx
             mx_map = {} # qubit_idx -> new_idx
             
-            for qubit_idx in range(nqubits):
-                if measure_matrices is not None and qubit_idx < len(measure_matrices):
-                    
-                    mx = measure_matrices[qubit_idx]
-
-                    if mx is None:
+            for qubit_idx in qctn.qubit_indices:
+                if measure_matrices is None:
+                    continue
+                
+                if isinstance(measure_matrices, dict):
+                    if qubit_idx not in measure_matrices:
                         continue
-                    
-                    uid = get_uid()
-                    mx_map[qubit_idx] = uid
+                
+                if isinstance(measure_matrices, list) or isinstance(measure_matrices, tuple):
+                    if qubit_idx >= len(measure_matrices):
+                        continue
+                
+                mx = measure_matrices[qubit_idx]
 
-                    # Mx shape: (B, d, d) or (B, 2, d, d)
-                    batch_sym = ""
-                    if mx.ndim == 3:
-                        batch_sym = "a"
-                    elif mx.ndim == 4:
-                        batch_sym = "ab"
-                    
-                    mx_entry = {
-                        'core_idx': uid,
-                        'core_name': f"mx_{qubit_idx}",
-                        'tensor_source': 'mx',
-                        'tensor_key': qubit_idx,
-                        'in_edge_list': [{
-                            'neighbor_idx': -1,
-                            'neighbor_name': "",
-                            'edge_rank': mx.shape[-2],
-                            'qubit_idx': qubit_idx,
-                        }],
-                        'out_edge_list': [{
-                            'neighbor_idx': -1,
-                            'neighbor_name': "",
-                            'edge_rank': mx.shape[-1],
-                            'qubit_idx': qubit_idx,
-                        }],
-                        'side': TensorSide.MIDDLE,
-                        'batch_symbol': batch_sym,
-                    }
-                    core_tensor_list.append(mx_entry)
+                if mx is None:
+                    continue
+                
+                uid = get_uid()
+                mx_map[qubit_idx] = uid
+
+                # Mx shape: (B, d, d) or (B, 2, d, d)
+                batch_sym = ""
+                if mx.ndim == 3:
+                    batch_sym = "a"
+                elif mx.ndim == 4:
+                    batch_sym = "ab"
+                
+                mx_entry = {
+                    'core_idx': uid,
+                    'core_name': f"mx_{qubit_idx}",
+                    'tensor_source': 'mx',
+                    'tensor_key': qubit_idx,
+                    'in_edge_list': [{
+                        'neighbor_idx': -1,
+                        'neighbor_name': "",
+                        'edge_rank': mx.shape[-2],
+                        'qubit_idx': qubit_idx,
+                    }],
+                    'out_edge_list': [{
+                        'neighbor_idx': -1,
+                        'neighbor_name': "",
+                        'edge_rank': mx.shape[-1],
+                        'qubit_idx': qubit_idx,
+                    }],
+                    'side': TensorSide.MIDDLE,
+                    'batch_symbol': batch_sym,
+                }
+                core_tensor_list.append(mx_entry)
             
             # 1.4 Add RIGHT version cores
             # Right version: in becomes out, out becomes in. Lists reversed. Tensor NOT transposed.
@@ -172,6 +195,8 @@ class GreedyStrategy(ContractionStrategy):
                 uid = get_uid()
                 right_core_map[core_info['core_idx']] = uid
                 
+                # print(f'add core_entry {core_info["core_name"]}_R with \n in_edge_list {core_info["in_edge_list"]} \n out_edge_list {core_info["out_edge_list"]}')
+
                 # Reverse edges: in becomes out, out becomes in
                 # Also reverse the order within each list
                 reversed_in_edges = deepcopy(core_info['out_edge_list'])[::-1]
@@ -195,27 +220,37 @@ class GreedyStrategy(ContractionStrategy):
             # 1.5 Add RIGHT version circuit_states
             right_circuit_map = {} # qubit_idx -> new_idx
             
-            for qubit_idx in range(nqubits):
-                if circuit_states is not None and qubit_idx < len(circuit_states):
-                    uid = get_uid()
-                    right_circuit_map[qubit_idx] = uid
-                    
-                    circuit_entry = {
-                        'core_idx': uid,
-                        'core_name': f"circuit_R_{qubit_idx}",
-                        'tensor_source': 'circuit',
-                        'tensor_key': qubit_idx,
-                        'in_edge_list': [{
-                            'neighbor_idx': -1,
-                            'neighbor_name': "",
-                            'edge_rank': circuit_states[qubit_idx].shape[0],
-                            'qubit_idx': qubit_idx,
-                        }],
-                        'out_edge_list': [],
-                        'side': TensorSide.RIGHT,
-                        'batch_symbol': "",
-                    }
-                    core_tensor_list.append(circuit_entry)
+            for qubit_idx in qctn.qubit_indices:
+                if circuit_states is None:
+                    continue
+                
+                if isinstance(circuit_states, dict):
+                    if qubit_idx not in circuit_states:
+                        continue
+                
+                if isinstance(circuit_states, list) or isinstance(circuit_states, tuple):
+                    if qubit_idx >= len(circuit_states):
+                        continue
+                
+                uid = get_uid()
+                right_circuit_map[qubit_idx] = uid
+                
+                circuit_entry = {
+                    'core_idx': uid,
+                    'core_name': f"circuit_R_{qubit_idx}",
+                    'tensor_source': 'circuit',
+                    'tensor_key': qubit_idx,
+                    'in_edge_list': [{
+                        'neighbor_idx': -1,
+                        'neighbor_name': "",
+                        'edge_rank': circuit_states[qubit_idx].shape[0],
+                        'qubit_idx': qubit_idx,
+                    }],
+                    'out_edge_list': [],
+                    'side': TensorSide.RIGHT,
+                    'batch_symbol': "",
+                }
+                core_tensor_list.append(circuit_entry)
             
             # ========================================
             # Step 2: Update neighbor connections
@@ -372,7 +407,7 @@ class GreedyStrategy(ContractionStrategy):
             # ========================================
             next_uid = len(core_tensor_list)
             
-            for qubit_idx in range(nqubits):
+            for qubit_idx in qctn.qubit_indices:
                 # Find all entries with edges on current qubit
                 entries_on_qubit = []
                 for entry in core_tensor_list:
@@ -398,8 +433,10 @@ class GreedyStrategy(ContractionStrategy):
                 # 在这里，neighbor_idx已经没办法直接和core_tensor_list对上了，所以需要再遍历一遍core_tensor_list来找
                 additional_entries = []
                 for entry in entries_on_qubit:
+                    # print(f'preprocess entry {entry["core_name"]}')
                     # Check in_edges
                     for edge in entry['in_edge_list']:
+                        # print(f'preprocess in edge {edge}')
                         neighbor_idx = edge['neighbor_idx']
                         if neighbor_idx >= 0:
                             # Find neighbor entry by core_idx
@@ -415,6 +452,7 @@ class GreedyStrategy(ContractionStrategy):
                                 additional_entries.append(neighbor_entry)
                     # Check out_edges
                     for edge in entry['out_edge_list']:
+                        # print(f'preprocess out edge {edge}')
                         neighbor_idx = edge['neighbor_idx']
                         if neighbor_idx >= 0:
                             # Find neighbor entry by core_idx
@@ -446,6 +484,11 @@ class GreedyStrategy(ContractionStrategy):
                 old_to_new_map = {} # old_core_idx -> new_entry
                 
                 for group_idx, group in enumerate(groups):
+
+                    #TODO: 只有一个元素时，存在bug，结果不对，先跳过。
+                    # if len(group) == 1:
+                    #     continue
+
                     new_entry = _contract_symmetric_group(
                         group, qubit_idx, backend, nqubits,
                         cores_dict, circuit_states, measure_matrices
@@ -688,8 +731,11 @@ def _contract_symmetric_group(
                 is_internal = neighbor_idx >= 0 and neighbor_idx in group_indices
                 is_on_current_qubit = edge['qubit_idx'] == qubit_idx
                 
-                empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                # empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                empty_edge = edge['neighbor_idx'] == -1 # and edge['neighbor_name'] == ""
                 
+                # print(f"out edge {edge} empty_edge: {empty_edge}, is_internal: {is_internal}, is_on_current_qubit: {is_on_current_qubit}")
+
                 if empty_edge or not is_internal and not is_on_current_qubit:
                     collected_out_edges.append((symbol, edge.copy()))
             
@@ -707,7 +753,10 @@ def _contract_symmetric_group(
                 is_internal = neighbor_idx >= 0 and neighbor_idx in group_indices
                 is_on_current_qubit = edge['qubit_idx'] == qubit_idx
                 
-                empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                # empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                empty_edge = edge['neighbor_idx'] == -1 # and edge['neighbor_name'] == ""
+
+                # print(f"in edge {edge} empty_edge: {empty_edge}, is_internal: {is_internal}, is_on_current_qubit: {is_on_current_qubit}")
                 
                 if empty_edge or not is_internal and not is_on_current_qubit:
                     collected_in_edges.append((symbol, edge.copy()))
@@ -728,8 +777,11 @@ def _contract_symmetric_group(
                 is_internal = neighbor_idx >= 0 and neighbor_idx in group_indices
                 is_on_current_qubit = edge['qubit_idx'] == qubit_idx
 
-                empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                # empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                empty_edge = edge['neighbor_idx'] == -1 # and edge['neighbor_name'] == ""
                 
+                # print(f"in edge {edge} empty_edge: {empty_edge}, is_internal: {is_internal}, is_on_current_qubit: {is_on_current_qubit}")
+
                 if empty_edge or not is_internal and not is_on_current_qubit:
                     collected_in_edges.append((symbol, edge.copy()))
             
@@ -742,8 +794,11 @@ def _contract_symmetric_group(
                 is_internal = neighbor_idx >= 0 and neighbor_idx in group_indices
                 is_on_current_qubit = edge['qubit_idx'] == qubit_idx
 
-                empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                # empty_edge = edge['neighbor_idx'] == -1 and edge['neighbor_name'] == ""
+                empty_edge = edge['neighbor_idx'] == -1 # and edge['neighbor_name'] == ""
                 
+                # print(f"out edge {edge} empty_edge: {empty_edge}, is_internal: {is_internal}, is_on_current_qubit: {is_on_current_qubit}")
+
                 if empty_edge or not is_internal and not is_on_current_qubit:
                     collected_out_edges.append((symbol, edge.copy()))
             
@@ -758,7 +813,10 @@ def _contract_symmetric_group(
     if 'b' in batch_symbols:
         output_symbols.append('b')
         new_batch_symbol += 'b'
-    
+
+    # print(f'collected_in_edges : {collected_in_edges}')
+    # print(f'collected_out_edges : {collected_out_edges}')
+
     for sym, _ in collected_in_edges:
         output_symbols.append(sym)
     for sym, _ in collected_out_edges:
@@ -792,8 +850,34 @@ def _contract_symmetric_group(
     # print(f"  Tensor shapes: {[t.shape for t in tensor_list]}")
     
     # Execute contraction
-    result_tensor = torch.einsum(einsum_eq, *tensor_list)
+    # result_tensor = torch.einsum(einsum_eq, *tensor_list)
     
+    # Check for TNTensors and prepare inputs for einsum
+    raw_tensor_list = []
+    total_scale = 1.0
+    has_tntensor = False
+
+    for t in tensor_list:
+        if isinstance(t, TNTensor):
+            has_tntensor = True
+            raw_tensor_list.append(t.tensor)
+            total_scale *= t.scale
+        else:
+            raw_tensor_list.append(t)
+    
+    # Execute contraction
+    if has_tntensor:
+        # print("  Using TNTensor contraction with scale handling.")
+        # print(f"  einsum eq: {einsum_eq} raw_tensor_list shapes: {[t.shape for t in raw_tensor_list]}")
+        # Use raw tensors for contraction
+        raw_result = torch.einsum(einsum_eq, *raw_tensor_list)
+    
+        # Create result TNTensor
+        result_tensor = TNTensor(raw_result, scale=total_scale)
+        result_tensor.auto_scale()
+    else:
+        result_tensor = torch.einsum(einsum_eq, *tensor_list)
+
     # print(f"  Result shape: {result_tensor.shape}")
     
     # Build remaining edges
@@ -815,6 +899,7 @@ def _contract_symmetric_group(
         'batch_symbol': new_batch_symbol,
     }
 
+    # print(f"  Created new merged entry: {new_entry['core_name']} with shape {result_tensor.shape}")
     # print(f"new_entry :\n{new_entry}")
     
     return new_entry
